@@ -93,8 +93,15 @@ d'en déduire le coût. Même moteur, même échéancier, sens de résolution in
 Regroupement par année civile avec ligne de sous-total, et deux vues : détail mensuel /
 synthèse annuelle seule.
 
-**Graphique** : capital restant dû et intérêts cumulés sur le même axe, avec lecture au
-survol (échéance pointée, intérêts, capital, reste dû).
+**Graphique** : un **bâton par mensualité**, empilé — intérêts en bas, capital amorti
+au-dessus — l'échelle verticale étant la mensualité elle-même. Lecture au survol et au
+clavier (échéance pointée, mensualité, intérêts et leur part, capital, reste dû).
+
+> **Révisé le 15 août 2026.** La version initiale demandait deux courbes, capital restant
+> dû et intérêts cumulés sur le même axe. Le diagramme en bâtons répond mieux à la
+> question qu'on se pose devant un échéancier — « où part mon argent ce mois-ci ? » — et
+> il rend visible d'un coup d'œil la propriété du mode §4.3 bis : quand toutes les
+> mensualités sont égales, le sommet des bâtons est parfaitement plat.
 
 **Exports** :
 

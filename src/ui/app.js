@@ -111,7 +111,7 @@ function compute() {
       el(id).hidden = true;
     }
     renderTable({ tbody: el("tbody"), schedule: [], view: state.view });
-    renderChart({ svg: el("chart"), probe: el("probe"), schedule: [], principal: 0 });
+    renderChart({ svg: el("chart"), probe: el("probe"), schedule: [] });
     return;
   }
 
@@ -130,12 +130,7 @@ function compute() {
   setExportsEnabled(true);
   renderReadout();
   renderTable({ tbody: el("tbody"), schedule: state.solved.schedule, view: state.view });
-  renderChart({
-    svg: el("chart"),
-    probe: el("probe"),
-    schedule: state.solved.schedule,
-    principal: state.solved.principal
-  });
+  renderChart({ svg: el("chart"), probe: el("probe"), schedule: state.solved.schedule });
 }
 
 /* ------------------------------------------------------------------------ readout */
