@@ -106,6 +106,10 @@ function compute() {
     errorBox.textContent = problem;
     state.solved = null;
     setExportsEnabled(false);
+    // Notes describe a result; with no result they would describe the previous one.
+    for (const id of ["round-note", "rate-warning", "convergence-warning"]) {
+      el(id).hidden = true;
+    }
     renderTable({ tbody: el("tbody"), schedule: [], view: state.view });
     renderChart({ svg: el("chart"), probe: el("probe"), schedule: [], principal: 0 });
     return;
@@ -143,10 +147,13 @@ function renderReadout() {
 
   el("mode-tag").textContent = round.applied
     ? "mensualité ronde"
-    : rateIsKnown
-      ? "coût déduit"
-      : "taux résolu";
+    : round.requested
+      ? "euros ronds impossible"
+      : rateIsKnown
+        ? "coût déduit"
+        : "taux résolu";
 
+  renderRateWarning(solved);
   renderRoundNote(solved);
 
   el("substituted").replaceChildren(
@@ -192,6 +199,29 @@ function renderReadout() {
 
   const warning = el("convergence-warning");
   warning.hidden = solved.converged;
+}
+
+/** Above this nominal annual rate, the inputs are almost certainly a slip, not a loan. */
+const IMPLAUSIBLE_ANNUAL_RATE = 1;
+
+/**
+ * A cost typed into the wrong field produces a rate of several hundred percent, and the
+ * engine will compute it without complaining. Say it out loud: the input mode already
+ * refuses a rate above 100 %, so the cost mode should not accept its equivalent in
+ * silence.
+ */
+function renderRateWarning(solved) {
+  const warning = el("rate-warning");
+  const implausible =
+    !solved.rateIsKnown && solved.annualNominalRate > IMPLAUSIBLE_ANNUAL_RATE;
+
+  warning.hidden = !implausible;
+  if (!implausible) return;
+
+  warning.textContent =
+    `Le coût saisi implique un taux annuel de ${formatPercent(solved.annualNominalRate, 1)}. ` +
+    "Vérifiez le capital, la durée et le coût : un tel taux ne correspond pas à un prêt. " +
+    "Le calcul ci-dessous reste exact, mais il décrit autre chose que ce que vous vouliez.";
 }
 
 /**

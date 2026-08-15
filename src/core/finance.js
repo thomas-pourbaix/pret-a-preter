@@ -184,9 +184,20 @@ export function buildSchedule({
  */
 export function balanceAfterConstantInstalments(principal, periods, payment, rate) {
   let balance = principal;
-  for (let k = 0; k < periods; k++) {
+
+  for (let k = 1; k <= periods; k++) {
     balance = round2(balance - round2(payment - round2(balance * rate)));
+
+    if (balance <= 0) {
+      // The debt is gone. Carrying on would charge interest on a credit, which makes the
+      // balance *fall* as the rate rises and destroys the monotonicity the search relies
+      // on. Settling on the last instalment is the goal; settling earlier means the
+      // instalment is too large for the term, so we report the instalments that would
+      // have been paid into the void — still monotonic, and never zero by accident.
+      return k === periods ? balance : balance - payment * (periods - k);
+    }
   }
+
   return balance;
 }
 

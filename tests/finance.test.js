@@ -352,6 +352,48 @@ describe("the round-instalment rate is the one that settles the loan", () => {
     expect(rateForExactInstalment(120_000, 240, 500)).toBe(0);
   });
 
+  // Regression: the closing balance used to keep charging interest after the debt was
+  // gone. Interest on a credit is negative, so the balance fell as the rate rose and the
+  // bisection was searching a function that ran the wrong way.
+  it.each([
+    [1_000, 24, 2_208],
+    [200_000, 240, 1_051],
+    [5_000, 120, 48],
+    [10_000, 60, 192]
+  ])("closing balance increases with the rate (P=%s n=%s M=%s)", (principal, periods, payment) => {
+    let previous = -Infinity;
+    for (let annual = 0.001; annual <= 5; annual *= 1.6) {
+      const balance = balanceAfterConstantInstalments(principal, periods, payment, annual / 12);
+      expect(balance).toBeGreaterThanOrEqual(previous);
+      previous = balance;
+    }
+  });
+
+  it("never reports zero when the instalment clears the debt before the term", () => {
+    // 2 208 € a month wipes a 1 000 € loan on the first instalment, so no rate can make
+    // it last 24 periods; the balance must stay strictly negative at every rate.
+    for (let annual = 0.01; annual <= 5; annual *= 1.5) {
+      expect(balanceAfterConstantInstalments(1_000, 24, 2_208, annual / 12)).toBeLessThan(0);
+    }
+    expect(rateForExactInstalment(1_000, 24, 2_208)).toBeNull();
+  });
+
+  it("gives up cleanly when no round instalment fits, instead of inventing one", () => {
+    const solved = solveLoan({
+      principal: 1_000,
+      periods: 24,
+      totalCost: 52_000,
+      startDate: START,
+      roundPayment: true
+    });
+
+    expect(solved.roundPayment.requested).toBe(true);
+    expect(solved.roundPayment.applied).toBe(false);
+    // Falling back means the banking convention, which must still be correct.
+    expect(solved.schedule).toHaveLength(24);
+    expect(solved.schedule[23].balance).toBe(0);
+  });
+
   it("leaves the schedule untouched when the mode is off", () => {
     const plain = solveLoan({
       principal: 200_000,
