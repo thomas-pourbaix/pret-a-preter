@@ -1,0 +1,8 @@
+# Dependencies are for the test harness only; the deployed site is plain static files.
+node_modules/
+
+# Test artefacts
+coverage/
+
+# macOS
+.DS_Store
