@@ -1,5 +1,7 @@
 # Échéancier de prêt amortissable
 
+**En ligne : <https://thomas-pourbaix.github.io/loan-schedule/>**
+
 Application web statique qui résout le **taux** d'un prêt amortissable à partir de trois
 hypothèses connues — capital emprunté, durée, coût cumulé des intérêts — puis déroule
 l'échéancier mois par mois et l'exporte en tableur.
