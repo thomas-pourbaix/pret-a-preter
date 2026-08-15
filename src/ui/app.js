@@ -18,6 +18,32 @@ import { renderTable } from "./table.js";
 
 const MAX_PERIODS = 1200;
 
+/**
+ * The masthead states what the page is doing, so it has to follow the mode: in rate mode
+ * it is the cost that is deduced, not the rate. Both variants share the same sentence
+ * shape so switching does not reflow the layout.
+ */
+const MASTHEAD = {
+  cost: {
+    lead: "Trois hypothèses connues,",
+    tail: "un taux ",
+    accent: "résolu",
+    statement:
+      "Le capital, la durée et le coût total sont donnés. Le taux, lui, se déduit : " +
+      "on l'extrait par dichotomie, puis on déroule chaque échéance ligne à ligne. " +
+      "Rien n'est masqué, tout s'exporte."
+  },
+  rate: {
+    lead: "Trois hypothèses connues,",
+    tail: "un coût ",
+    accent: "déduit",
+    statement:
+      "Le capital, la durée et le taux sont donnés. Le coût, lui, se déduit : " +
+      "on en tire la mensualité, puis on déroule chaque échéance ligne à ligne. " +
+      "Rien n'est masqué, tout s'exporte."
+  }
+};
+
 const el = (id) => document.getElementById(id);
 
 const state = { solved: null, view: "monthly" };
@@ -232,6 +258,22 @@ function toggleMode() {
   const rateIsKnown = el("known-rate").checked;
   el("field-cost").hidden = rateIsKnown;
   el("field-rate").hidden = !rateIsKnown;
+  renderMasthead(rateIsKnown ? MASTHEAD.rate : MASTHEAD.cost);
+}
+
+function renderMasthead({ lead, tail, accent, statement }) {
+  const emphasis = document.createElement("em");
+  emphasis.textContent = accent;
+
+  el("headline").replaceChildren(
+    text(lead),
+    document.createElement("br"),
+    text(tail),
+    emphasis,
+    text(".")
+  );
+
+  el("statement").textContent = statement;
 }
 
 init();
