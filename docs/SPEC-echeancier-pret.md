@@ -171,31 +171,31 @@ structure du code, à ne pas implémenter.
 
 ---
 
-## 5. Export XLSX à formules vivantes
+## 5. Export XLSX
 
-Exigence structurante, elle porte la promesse de transparence : le classeur exporté doit
-**se recalculer tout seul** si on modifie une hypothèse dedans.
+> **Révisé le 15 août 2026.** Les formules vivantes ont été **sorties du périmètre** sur
+> décision explicite. La version initiale de ce paragraphe, qui décrivait un classeur se
+> recalculant tout seul et le détail des formules colonne par colonne, est caduque et a
+> été retirée. Elle reste consultable dans l'historique git.
 
-**Onglet `Hypothèses`** : capital en `B2`, nombre de mensualités en `B3`, taux mensuel en
-`B4`, mensualité en `B5`, coût total en `B6`, taux annuel nominal en `B7` (`=B4*12`), taux
-équivalent en `B8` (`=(1+B4)^12-1`).
+Le classeur exporté porte **les valeurs calculées**, avec les formats de nombre qui vont
+avec, sur deux onglets.
 
-**Onglet `Échéancier`**, en-têtes ligne 1, une ligne par échéance à partir de la ligne 2 :
+**Onglet `Hypothèses`** : capital emprunté, nombre de mensualités, taux mensuel,
+mensualité, taux annuel nominal, taux annuel équivalent, coût total des intérêts, coût
+saisi, **écart d'arrondi**, date de première échéance. Chaque ligne porte une note qui dit
+d'où vient la valeur — « saisi », « résolu par dichotomie, N itérations », « taux mensuel
+× 12 ». C'est ce qui remplace la transparence qu'apportaient les formules : le lecteur
+peut refaire le calcul, même si le classeur ne le refait plus pour lui.
 
-| Colonne | Ligne 2 (première échéance) | Lignes suivantes |
-|---|---|---|
-| D — Intérêts | `=ROUND('Hypothèses'!$B$2*'Hypothèses'!$B$4;2)` | `=ROUND(F{n-1}*'Hypothèses'!$B$4;2)` |
-| C — Mensualité | `='Hypothèses'!$B$5` | idem, **sauf dernière ligne** : `=D{n}+E{n}` |
-| E — Capital amorti | `=C2-D2` | idem, **sauf dernière ligne** : `=F{n-1}` |
-| F — Capital restant dû | `='Hypothèses'!$B$2-E2` | `=F{n-1}-E{n}` |
-| G — Intérêts cumulés | `=D2` | `=G{n-1}+D{n}` |
-| H — Capital remboursé | `=E2` | `=H{n-1}+E{n}` |
+**Onglet `Échéancier`** : en-têtes ligne 1, une ligne par échéance ensuite, colonnes
+identiques à celles du §3.3. Les montants sont écrits comme des **nombres** au format
+`#,##0.00`, les dates comme des **dates** au format `dd/mm/yyyy` — jamais comme du texte
+pré-formaté, pour rester exploitables dans un tableur.
 
-Chaque cellule porte **la formule et la valeur** (`{t:"n", f:"…", v:…}` côté SheetJS), pour
-que le classeur s'affiche correctement avant même le premier recalcul.
-
-Point de vigilance validé sur le prototype : les références inter-onglets doivent être
-**quotées** (`'Hypothèses'!$B$4`) à cause de l'accent dans le nom de l'onglet.
+Si les formules devaient revenir au périmètre, la bibliothèque retenue
+(`write-excel-file`) sait les écrire via un type de cellule `Formula` : ce serait une
+évolution du module `src/export/xlsx.js`, pas un changement de brique.
 
 ---
 
@@ -215,6 +215,14 @@ centime près, sur tout jeu d'entrées valide.
 **INV-004 — Fidélité à l'hypothèse de coût.** `|Σ intérêts − C| ≤ 0,05 €` (l'écart provient
 uniquement des arrondis au centime).
 
+> **Corrigé le 15 août 2026, à la suite d'un test rouge.** La borne de cinq centimes tient
+> sur le cas de référence A dont elle est tirée, mais ce n'est pas un théorème : arrondir
+> les intérêts au centime à chaque échéance dérive jusqu'à un demi-centime par période, et
+> la dernière mensualité absorbe la dérive en *capital*, pas celle en *intérêts*. Le cas
+> `P = 12 345,67 €, n = 37, C = 987,65 €` atteint six centimes. La borne effectivement
+> garantie par les conventions du §4.3 est `0,005 × n + 0,01` ; c'est elle qui est testée
+> dans le cas général, la borne de cinq centimes restant asserée sur le cas A.
+
 **INV-005 — Aller-retour des modes.** Résoudre le taux depuis un coût, puis réinjecter ce
 taux en mode « je connais le taux », redonne le même échéancier au centime près.
 
@@ -233,8 +241,15 @@ taux équivalent     2,426 %
 mensualité          1 050,00 €
 dernière échéance   1 049,96 €  (ajustée)
 intérêts cumulés    51 999,96 €
-convergence         47 itérations, résidu ~1,3e-11 €
+convergence         48 itérations, résidu ~1,3e-11 €
 ```
+
+> **48 et non 47.** Le prototype renvoyait le milieu du *dernier encadrement* au lieu du
+> point dont il venait de mesurer le résidu. L'erreur était invisible quand la convergence
+> est lente, et grossière quand elle est immédiate : pour `n = 1`, la première dichotomie
+> tombe sur le taux exact alors que l'encadrement fait encore 0,01 de large, et le
+> prototype rendait 0,025 au lieu de 0,03. C'est INV-007 qui l'a fait tomber. Corrigé dans
+> `solveRate` ; le compteur d'itérations gagne une unité au passage.
 
 **Cas de référence B** — mode taux, `P = 200 000 €`, `n = 240`, taux nominal `2,45 %` :
 

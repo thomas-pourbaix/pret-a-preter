@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Échéancier — prêt amortissable</title>
+<meta name="description" content="Trois hypothèses (capital, durée, coût total), un taux résolu, un échéancier mois par mois exportable en tableur.">
+
+<style>
+/* ---------------------------------------------------------------
+   Fonts are served from this repository, never from a third party:
+   the page claims that no data leaves the browser, and a webfont
+   CDN would hand the visitor's IP address to someone else.
+   IBM Plex, SIL Open Font License 1.1 — see vendor/fonts/.
+   --------------------------------------------------------------- */
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400;font-display:swap;
+  src:url("./vendor/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:600;font-display:swap;
+  src:url("./vendor/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;
+  src:url("./vendor/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;
+  src:url("./vendor/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Serif";font-style:normal;font-weight:600;font-display:swap;
+  src:url("./vendor/fonts/ibm-plex-serif-latin-600-normal.woff2") format("woff2")}
+
+/* ---------------------------------------------------------------
+   Design tokens. Graph-paper ground, petrol ink, violet ink accent.
+   One superfamily in three voices: serif display, sans body, mono
+   for every figure that can be audited.
+   --------------------------------------------------------------- */
+:root{
+  --paper:#F5F7F6;
+  --paper-card:#FFFFFF;
+  --grid-minor:#E3EBE9;
+  --grid-major:#D2E1DF;
+  --ink:#17262B;
+  --ink-soft:#5F757C;
+  --ink-faint:#93A6AB;
+  --rule:#DCE5E4;
+  --capital:#1F6F78;
+  --interest:#6A4CA8;
+  --adjust:#9A6B12;
+  --focus:#6A4CA8;
+  --r:4px;
+  --display:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  color:var(--ink);
+  font-family:var(--body);
+  font-size:15px;
+  line-height:1.5;
+  background-color:var(--paper);
+  background-image:
+    linear-gradient(var(--grid-minor) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid-minor) 1px,transparent 1px),
+    linear-gradient(var(--grid-major) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid-major) 1px,transparent 1px);
+  background-size:8px 8px,8px 8px,40px 40px,40px 40px;
+}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+.skip{position:absolute;left:-9999px;top:0;background:var(--ink);color:#fff;padding:10px 14px;z-index:10}
+.skip:focus{left:8px;top:8px}
+
+/* masthead ---------------------------------------------------- */
+.masthead{padding:48px 0 28px}
+.masthead h1{
+  font-family:var(--display);font-weight:600;
+  font-size:clamp(30px,5vw,46px);line-height:1.05;margin:0;letter-spacing:-.015em;
+}
+.masthead h1 em{font-style:normal;color:var(--interest)}
+.statement{margin:14px 0 0;max-width:56ch;color:var(--ink-soft);font-size:16px}
+.eyebrow{
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-faint);margin:0 0 10px;
+}
+
+/* panels ------------------------------------------------------ */
+.panel{
+  background:var(--paper-card);border:1px solid var(--rule);border-radius:var(--r);
+  box-shadow:0 1px 0 rgba(23,38,43,.04);
+}
+.solver{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:20px;align-items:start}
+@media(max-width:860px){.solver{grid-template-columns:1fr}}
+.panel-head{
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:14px 18px;border-bottom:1px solid var(--rule);flex-wrap:wrap;
+}
+.panel-head h2{
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  font-weight:500;margin:0;color:var(--ink-soft);
+}
+.panel-body{padding:18px}
+
+/* inputs ------------------------------------------------------ */
+.field{margin-bottom:16px}
+.field:last-child{margin-bottom:0}
+.field > label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
+.hint{display:block;font-size:12px;color:var(--ink-faint);margin-top:5px}
+.control{display:flex;align-items:stretch}
+input[type=text],input[type=date],select{
+  font-family:var(--mono);font-size:15px;color:var(--ink);
+  width:100%;min-width:0;padding:9px 10px;
+  border:1px solid var(--rule);border-radius:var(--r);background:#fff;
+}
+input[type=text]:hover,select:hover{border-color:var(--grid-major)}
+.control .suffix{
+  display:flex;align-items:center;padding:0 10px;margin-left:-1px;
+  border:1px solid var(--rule);border-radius:0 var(--r) var(--r) 0;
+  background:var(--paper);font-family:var(--mono);font-size:13px;color:var(--ink-soft);
+}
+.control input{border-radius:var(--r) 0 0 var(--r)}
+.control select.suffix-select{
+  width:auto;flex:0 0 auto;margin-left:-1px;border-radius:0 var(--r) var(--r) 0;
+  background:var(--paper);font-size:13px;
+}
+.switch{display:flex;border:1px solid var(--rule);border-radius:var(--r);overflow:hidden;margin-bottom:16px}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch label{
+  flex:1;text-align:center;padding:7px 8px;font-size:12.5px;cursor:pointer;
+  background:var(--paper);color:var(--ink-soft);border-right:1px solid var(--rule);
+}
+.switch label:last-of-type{border-right:0}
+.switch input:checked + label{background:var(--ink);color:#fff}
+.switch input:focus-visible + label{outline:2px solid var(--focus);outline-offset:-2px}
+
+/* readout ----------------------------------------------------- */
+.readout .panel-body{padding:22px 24px}
+.equation{
+  font-family:var(--mono);font-size:15px;color:var(--ink-soft);
+  padding-bottom:14px;border-bottom:1px dashed var(--grid-major);
+}
+.equation .lhs{color:var(--ink);font-weight:600}
+.substituted{
+  font-family:var(--mono);font-size:13px;margin-top:8px;color:var(--ink-faint);
+  overflow-x:auto;white-space:nowrap;padding-bottom:2px;
+}
+.substituted b{color:var(--interest);font-weight:500}
+.solved{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:18px}
+@media(max-width:620px){.solved{grid-template-columns:1fr}}
+.metric .k{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);display:block;margin-bottom:3px;
+}
+.metric .v{font-family:var(--mono);font-size:clamp(19px,2.6vw,25px);font-weight:500;letter-spacing:-.01em}
+.metric .v.big{color:var(--interest)}
+.metric .sub{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);display:block;margin-top:2px}
+.convergence{
+  margin-top:18px;padding-top:12px;border-top:1px solid var(--rule);
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);
+  display:flex;flex-wrap:wrap;gap:6px 18px;
+}
+.note{
+  margin-top:14px;padding:10px 12px;border-left:3px solid var(--adjust);
+  background:#FDF8EC;font-size:13px;color:#5B4410;
+}
+[hidden]{display:none !important}
+
+/* chart ------------------------------------------------------- */
+.chart-legend{display:flex;gap:18px;font-family:var(--mono);font-size:11.5px;color:var(--ink-soft)}
+.chip{display:inline-flex;align-items:center;gap:6px}
+.chip i{width:10px;height:2px;display:inline-block}
+svg .axis{font-family:var(--mono);font-size:10px;fill:var(--ink-faint)}
+svg .gridline{stroke:var(--grid-minor);stroke-width:1}
+.probe{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-top:8px;min-height:2.8em}
+
+/* table ------------------------------------------------------- */
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{
+  font-family:var(--body);font-size:13px;color:var(--ink);cursor:pointer;
+  padding:7px 12px;border:1px solid var(--rule);border-radius:var(--r);background:#fff;
+}
+button:hover:not(:disabled){border-color:var(--ink-faint);background:var(--paper)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+button.primary:hover:not(:disabled){background:#0D1A1E}
+button[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.scroller{max-height:65vh;overflow:auto}
+.scroller:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12.5px}
+thead th{
+  position:sticky;top:0;z-index:2;background:var(--paper-card);
+  border-bottom:1px solid var(--ink);text-align:right;font-weight:500;
+  padding:9px 12px;white-space:nowrap;color:var(--ink-soft);
+  font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+}
+thead th:first-child,thead th:nth-child(2){text-align:left}
+tbody td{padding:6px 12px;text-align:right;border-bottom:1px solid var(--grid-minor);white-space:nowrap}
+tbody td:first-child,tbody td:nth-child(2){text-align:left;color:var(--ink-soft)}
+tbody tr:hover td{background:#F7F5FC}
+td.interest{color:var(--interest)}
+td.capital{color:var(--capital)}
+tr.year-row td{
+  background:var(--paper);font-weight:600;border-bottom:1px solid var(--grid-major);
+  border-top:1px solid var(--grid-major);
+}
+tr.year-row td:first-child{letter-spacing:.06em;text-transform:uppercase;font-size:11px}
+tr.adjusted-row td{background:#FDF8EC}
+.flag{color:var(--adjust);font-size:11px}
+
+/* footer ------------------------------------------------------ */
+footer{margin:36px 0 60px;padding-top:18px;border-top:1px solid var(--rule);color:var(--ink-soft);font-size:13px}
+footer ul{margin:8px 0 0;padding-left:18px}
+footer li{margin-bottom:4px}
+footer a{color:var(--interest)}
+section{margin-bottom:22px}
+@media print{
+  body{background:#fff}
+  .no-print{display:none !important}
+  .scroller{max-height:none;overflow:visible}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#schedule-section">Aller à l'échéancier</a>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Prêt amortissable · mensualités constantes</p>
+    <h1>Trois hypothèses connues,<br>un taux <em>résolu</em>.</h1>
+    <p class="statement">Le capital, la durée et le coût total sont donnés. Le taux, lui, se déduit : on l'extrait par dichotomie, puis on déroule chaque échéance ligne à ligne. Rien n'est masqué, tout s'exporte.</p>
+  </header>
+
+  <section class="solver">
+
+    <form class="panel inputs" id="form" autocomplete="off">
+      <div class="panel-head"><h2>Hypothèses</h2></div>
+      <div class="panel-body">
+
+        <div class="switch" role="radiogroup" aria-label="Donnée connue">
+          <input type="radio" name="known" id="known-cost" value="cost" checked>
+          <label for="known-cost">Je connais le coût</label>
+          <input type="radio" name="known" id="known-rate" value="rate">
+          <label for="known-rate">Je connais le taux</label>
+        </div>
+
+        <div class="field">
+          <label for="principal">Somme empruntée</label>
+          <div class="control">
+            <input type="text" id="principal" inputmode="decimal" value="200 000">
+            <span class="suffix">€</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="term">Durée d'emprunt</label>
+          <div class="control">
+            <input type="text" id="term" inputmode="numeric" value="20">
+            <select id="term-unit" class="suffix-select" aria-label="Unité de durée">
+              <option value="years" selected>années</option>
+              <option value="months">mois</option>
+            </select>
+          </div>
+          <span class="hint" id="term-hint">240 mensualités</span>
+        </div>
+
+        <div class="field" id="field-cost">
+          <label for="cost">Coût cumulé de l'emprunt</label>
+          <div class="control">
+            <input type="text" id="cost" inputmode="decimal" value="52 000">
+            <span class="suffix">€</span>
+          </div>
+          <span class="hint">Intérêts seuls, hors assurance et frais de dossier.</span>
+        </div>
+
+        <div class="field" id="field-rate" hidden>
+          <label for="rate">Taux annuel nominal</label>
+          <div class="control">
+            <input type="text" id="rate" inputmode="decimal" value="2,45">
+            <span class="suffix">%</span>
+          </div>
+          <span class="hint">Taux proportionnel : taux mensuel × 12.</span>
+        </div>
+
+        <div class="field">
+          <label for="start">Première échéance</label>
+          <input type="date" id="start">
+        </div>
+
+      </div>
+    </form>
+
+    <div class="panel readout">
+      <div class="panel-head">
+        <h2>Résolution</h2>
+        <span class="eyebrow" style="margin:0" id="mode-tag">taux résolu</span>
+      </div>
+      <div class="panel-body">
+
+        <div class="equation">
+          <span class="lhs">M</span> = P × i ⁄ ( 1 − (1 + i)<sup>−n</sup> )
+          <div class="substituted" id="substituted"></div>
+        </div>
+
+        <div class="solved">
+          <div class="metric">
+            <span class="k">Mensualité</span>
+            <span class="v big" id="out-payment">—</span>
+            <span class="sub" id="out-payment-sub"></span>
+          </div>
+          <div class="metric">
+            <span class="k">Taux annuel nominal</span>
+            <span class="v" id="out-rate">—</span>
+            <span class="sub" id="out-rate-sub"></span>
+          </div>
+          <div class="metric">
+            <span class="k">Coût total des intérêts</span>
+            <span class="v" id="out-cost">—</span>
+            <span class="sub" id="out-cost-sub"></span>
+          </div>
+        </div>
+
+        <div class="convergence" id="convergence" aria-live="polite"></div>
+        <div class="note" id="convergence-warning" hidden>Le solveur n'a pas convergé : le coût demandé est hors de portée pour cette durée. Le taux affiché est une borne, pas une solution.</div>
+        <div class="note" id="error" role="alert" hidden></div>
+      </div>
+    </div>
+
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Extinction de la dette</h2>
+      <div class="chart-legend">
+        <span class="chip"><i style="background:#1F6F78"></i>Capital restant dû</span>
+        <span class="chip"><i style="background:#6A4CA8"></i>Intérêts cumulés</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <svg id="chart" viewBox="0 0 960 260" style="width:100%;height:260px;display:block"
+           role="img" tabindex="0"
+           aria-label="Courbes du capital restant dû et des intérêts cumulés. Flèches gauche et droite pour parcourir les échéances."></svg>
+      <p class="probe" id="probe" aria-live="polite">Survolez la courbe, ou parcourez-la au clavier, pour lire une échéance.</p>
+    </div>
+  </section>
+
+  <section class="panel" id="schedule-section">
+    <div class="panel-head">
+      <h2>Échéancier</h2>
+      <div class="toolbar no-print">
+        <button type="button" id="view-monthly" aria-pressed="true">Détail mensuel</button>
+        <button type="button" id="view-yearly" aria-pressed="false">Synthèse annuelle</button>
+        <button type="button" id="export-csv">Exporter CSV</button>
+        <button type="button" class="primary" id="export-xlsx">Exporter le tableur</button>
+      </div>
+    </div>
+    <div class="scroller" tabindex="0" role="region" aria-label="Tableau de l'échéancier, défilable au clavier">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">N°</th>
+            <th scope="col">Échéance</th>
+            <th scope="col">Mensualité</th>
+            <th scope="col">Intérêts</th>
+            <th scope="col">Capital amorti</th>
+            <th scope="col">Capital restant dû</th>
+            <th scope="col">Intérêts cumulés</th>
+            <th scope="col">Capital remboursé</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p><strong>Conventions de calcul, pour que rien ne soit implicite :</strong></p>
+    <ul>
+      <li>Mensualité constante, intérêts calculés sur le capital restant dû au taux mensuel <em>i</em>, arrondis au centime à chaque échéance.</li>
+      <li>Taux annuel nominal = <em>i</em> × 12 (taux proportionnel, convention des offres de prêt françaises). Le taux annuel équivalent, actuariel, vaut (1+<em>i</em>)<sup>12</sup> − 1.</li>
+      <li>La mensualité est arrondie au centime, donc la dernière échéance est ajustée pour solder exactement le capital. L'écart avec le coût saisi est affiché, jamais masqué.</li>
+      <li>Hors assurance emprunteur, frais de dossier, garantie et frais annexes : ce n'est donc pas un TAEG.</li>
+      <li>Le tableur exporté contient les <strong>valeurs calculées</strong> et les hypothèses qui les produisent, sur deux onglets.</li>
+    </ul>
+    <p style="margin-top:14px;font-size:12.5px;color:var(--ink-faint)">
+      Export tableur assuré par <a href="https://gitlab.com/catamphetamine/write-excel-file">write-excel-file</a> (MIT). Police <a href="https://github.com/IBM/plex">IBM Plex</a> (OFL-1.1), servie depuis ce dépôt. La résolution du taux est écrite pour ce projet : encadrement puis dichotomie, vérifiée en test contre les implémentations de <code>RATE</code> de Formula.js et tvm-financejs.
+      Page statique : tout le calcul se fait dans votre navigateur, aucune donnée n'est transmise, aucune requête n'est faite à un tiers.
+    </p>
+    <p style="margin-top:10px;font-size:12.5px">
+      Logiciel libre sous <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a> —
+      <a href="https://github.com/MonsieurPou/loan-schedule">code source sur GitHub</a>.
+    </p>
+  </footer>
+
+</div>
+
+<script src="./vendor/write-excel-file.min.js"></script>
+<script type="module" src="./src/ui/app.js"></script>
+</body>
+</html>
