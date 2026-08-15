@@ -156,6 +156,31 @@ Ce sont elles qui font qu'un échéancier tombe juste ou pas.
 4. Conséquence assumée : le coût total effectif diffère de l'hypothèse saisie de quelques
    centimes. **Cet écart doit être affiché, pas masqué.**
 
+### 4.3 bis — Mode « mensualité en euros ronds » (ajouté le 15 août 2026)
+
+Convention alternative, **active par défaut**, destinée au prêt entre particuliers remboursé
+par virement permanent : une dernière échéance ajustée y oblige l'emprunteur à corriger son
+virement, ce qui n'est pas un problème pour une banque (elle prélève) mais en est un ici.
+
+Dans ce mode, la mensualité est un **nombre entier d'euros** et vaut la même chose sur les
+`n` échéances, sans exception. Il n'y a plus d'échéance ajustée.
+
+Cela n'est possible que parce qu'on dispose d'un degré de liberté : **le taux est continu,
+alors que le solde final ne prend que des valeurs en centimes**. Pour une mensualité entière
+donnée, les taux qui soldent exactement le prêt forment donc un intervalle — quand cet
+intervalle n'est pas vide, car un pas peut enjamber zéro. L'algorithme :
+
+1. calculer la mensualité idéale `(P + C) / n`, l'arrondir à l'euro ;
+2. pour cette mensualité, chercher par dichotomie un taux qui solde à `0,00 €` exactement ;
+3. si aucun n'existe, essayer la mensualité entière suivante, en s'écartant d'un euro à la
+   fois, de part et d'autre (à égalité, la mensualité la plus basse gagne) ;
+4. en pratique un écart de 0 à 3 € suffit toujours sur les cas testés ; la recherche
+   abandonne au-delà de 24 € et le mode se désactive alors proprement.
+
+**Le coût total n'est plus celui saisi** : il vaut exactement `n × M − P`. Le déplacement
+de la mensualité, le taux retenu et le nouveau coût doivent être affichés en toutes lettres.
+C'est le prix de la contrainte, et il n'a pas à être discret.
+
 ### 4.4 Conventions de taux
 
 - Taux annuel **nominal** = `i × 12` (taux proportionnel, convention des offres de prêt françaises).
@@ -231,6 +256,12 @@ strictement d'une échéance à la suivante (hors dernière échéance ajustée)
 
 **INV-007 — Cas dégénéré `n = 1`.** La solution analytique est `i = C / P` : le solveur doit
 la retrouver à `1e-9` près.
+
+**INV-008 — Mensualité ronde invariante** (ajouté le 15 août 2026, mode du §4.3 bis). La
+mensualité est un entier d'euros ; les `n` échéances portent **toutes** ce même montant,
+aucune n'est marquée ajustée ; le capital restant dû après la dernière vaut exactement
+`0,00 €` ; et le coût total vaut exactement `n × M − P`. L'écart entre la mensualité idéale
+et la mensualité retenue reste `≤ 3 €` sur les cas de référence.
 
 **Cas de référence A** — `P = 200 000 €`, `n = 240`, `C = 52 000 €` :
 

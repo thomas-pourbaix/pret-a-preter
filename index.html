@@ -160,6 +160,12 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
   margin-top:14px;padding:10px 12px;border-left:3px solid var(--adjust);
   background:#FDF8EC;font-size:13px;color:#5B4410;
 }
+.note.info{border-left-color:var(--capital);background:#F0F6F5;color:#14484D}
+.note b{font-weight:600}
+.field.check > label{
+  display:flex;align-items:flex-start;gap:8px;font-weight:600;cursor:pointer;margin-bottom:0;
+}
+.field.check input{margin:2px 0 0;flex:0 0 auto;accent-color:var(--interest);width:15px;height:15px}
 [hidden]{display:none !important}
 
 /* chart ------------------------------------------------------- */
@@ -278,6 +284,14 @@ section{margin-bottom:22px}
           <span class="hint">Taux proportionnel : taux mensuel × 12.</span>
         </div>
 
+        <div class="field check">
+          <label for="round-payment">
+            <input type="checkbox" id="round-payment" checked>
+            <span>Mensualité en euros ronds</span>
+          </label>
+          <span class="hint">Toutes les échéances rigoureusement identiques, sans centimes. Le taux est ajusté pour que le prêt se solde exactement — pratique pour un virement permanent.</span>
+        </div>
+
         <div class="field">
           <label for="start">Première échéance</label>
           <input type="date" id="start">
@@ -316,6 +330,7 @@ section{margin-bottom:22px}
           </div>
         </div>
 
+        <div class="note info" id="round-note" hidden></div>
         <div class="convergence" id="convergence" aria-live="polite"></div>
         <div class="note" id="convergence-warning" hidden>Le solveur n'a pas convergé : le coût demandé est hors de portée pour cette durée. Le taux affiché est une borne, pas une solution.</div>
         <div class="note" id="error" role="alert" hidden></div>

@@ -60,8 +60,9 @@ function readInputs() {
   const startDate = el("start").value
     ? new Date(`${el("start").value}T12:00:00`)
     : new Date();
+  const roundPayment = el("round-payment").checked;
 
-  return { principal, periods, rateIsKnown, totalCost, annualRate, startDate };
+  return { principal, periods, rateIsKnown, totalCost, annualRate, startDate, roundPayment };
 }
 
 /** Returns a message to show, or null when the inputs are usable. */
@@ -116,6 +117,7 @@ function compute() {
     principal: inputs.principal,
     periods: inputs.periods,
     startDate: inputs.startDate,
+    roundPayment: inputs.roundPayment,
     ...(inputs.rateIsKnown
       ? { periodicRate: inputs.annualRate / 12 }
       : { totalCost: inputs.totalCost })
@@ -137,8 +139,15 @@ function compute() {
 function renderReadout() {
   const solved = state.solved;
   const { principal, periods, rate, payment, rateIsKnown } = solved;
+  const round = solved.roundPayment;
 
-  el("mode-tag").textContent = rateIsKnown ? "coût déduit" : "taux résolu";
+  el("mode-tag").textContent = round.applied
+    ? "mensualité ronde"
+    : rateIsKnown
+      ? "coût déduit"
+      : "taux résolu";
+
+  renderRoundNote(solved);
 
   el("substituted").replaceChildren(
     strong(formatNumber(payment)),
@@ -147,37 +156,91 @@ function renderReadout() {
     text(` ⁄ ( 1 − ${formatNumber(1 + rate, 7)} ^ −${periods} )`)
   );
 
-  el("out-payment").textContent = formatEuro(payment);
-  el("out-payment-sub").textContent =
-    `${periods} × ${formatEuro(payment)} = ${formatEuroRounded(payment * periods)}`;
+  // A round instalment is shown without its two zero cents: the point is that it is round.
+  const showPayment = round.applied ? formatEuroRounded : formatEuro;
+  el("out-payment").textContent = showPayment(payment);
+  el("out-payment-sub").textContent = round.applied
+    ? `${periods} × ${showPayment(payment)}, sans exception`
+    : `${periods} × ${formatEuro(payment)} = ${formatEuroRounded(payment * periods)}`;
 
   el("out-rate").textContent = formatPercent(solved.annualNominalRate, 3);
   el("out-rate-sub").textContent =
     `mensuel ${formatPercent(rate, 5)} · équivalent ${formatPercent(solved.annualEquivalentRate, 3)}`;
 
   el("out-cost").textContent = formatEuro(solved.effectiveCost);
-  el("out-cost-sub").textContent = rateIsKnown
-    ? `${formatNumber((solved.effectiveCost / principal) * 100, 1)} % du capital emprunté`
-    : describeDrift(solved.costDrift);
+  el("out-cost-sub").textContent = round.applied
+    ? describeDrift(solved.costDrift, "mensualité ronde")
+    : rateIsKnown
+      ? `${formatNumber((solved.effectiveCost / principal) * 100, 1)} % du capital emprunté`
+      : describeDrift(solved.costDrift, "arrondis au centime");
 
   el("convergence").replaceChildren(
-    ...(rateIsKnown
-      ? [chip("Taux donné, coût déduit"), chip("arrondi au centime sur chaque échéance")]
-      : [
-          chip("Résolu par encadrement puis dichotomie"),
-          chip(`${solved.iterations} itérations`),
-          chip(`écart résiduel ${Math.abs(solved.residual).toExponential(1)} €`)
-        ])
+    ...(round.applied
+      ? [
+          chip("Taux choisi pour que la mensualité ronde solde exactement"),
+          chip("aucune échéance ajustée"),
+          chip("solde final 0,00 €")
+        ]
+      : rateIsKnown
+        ? [chip("Taux donné, coût déduit"), chip("arrondi au centime sur chaque échéance")]
+        : [
+            chip("Résolu par encadrement puis dichotomie"),
+            chip(`${solved.iterations} itérations`),
+            chip(`écart résiduel ${Math.abs(solved.residual).toExponential(1)} €`)
+          ])
   );
 
   const warning = el("convergence-warning");
   warning.hidden = solved.converged;
 }
 
-const describeDrift = (drift) =>
+/**
+ * Says what the round-instalment constraint cost, in plain words. Snapping the
+ * instalment to the euro moves the rate and therefore the total cost, and that is
+ * precisely the sort of thing this tool refuses to do silently.
+ */
+function renderRoundNote(solved) {
+  const note = el("round-note");
+  const round = solved.roundPayment;
+
+  if (!round.requested) {
+    note.hidden = true;
+    return;
+  }
+
+  note.hidden = false;
+
+  if (!round.applied) {
+    note.classList.remove("info");
+    note.textContent =
+      "Aucune mensualité en euros ronds ne solde exactement ce prêt, même en s'écartant " +
+      "de 24 €. La dernière échéance est donc ajustée, comme le ferait une banque.";
+    return;
+  }
+
+  note.classList.add("info");
+  note.replaceChildren(
+    text("Mensualité arrondie de "),
+    strong(formatEuro(round.idealPayment)),
+    text(" à "),
+    strong(formatEuroRounded(solved.payment)),
+    text(`, et taux porté à ${formatPercent(solved.annualNominalRate, 4)} pour que les `),
+    strong(`${solved.periods} échéances identiques`),
+    text(" soldent le prêt au centime. "),
+    text(
+      round.offset === 0
+        ? "L'arrondi tombait juste : le coût est celui que vous aviez demandé."
+        : `Le coût passe de ${formatEuro(solved.targetCost)} à ` +
+          `${formatEuro(solved.effectiveCost)}, soit ` +
+          `${solved.costDrift > 0 ? "+" : ""}${formatNumber(solved.costDrift)} €.`
+    )
+  );
+}
+
+const describeDrift = (drift, cause) =>
   Math.abs(drift) < 0.005
     ? "conforme à l'hypothèse saisie"
-    : `${drift > 0 ? "+" : ""}${formatNumber(drift)} € vs hypothèse (arrondis au centime)`;
+    : `${drift > 0 ? "+" : ""}${formatNumber(drift)} € vs hypothèse (${cause})`;
 
 const text = (value) => document.createTextNode(value);
 

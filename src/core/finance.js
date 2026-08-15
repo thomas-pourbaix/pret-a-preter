@@ -130,7 +130,14 @@ export function solveRate(principal, totalCost, periods) {
  * @param {Date} params.startDate date of the first instalment
  * @returns {Array<object>} one row per instalment
  */
-export function buildSchedule({ principal, rate, periods, payment, startDate }) {
+export function buildSchedule({
+  principal,
+  rate,
+  periods,
+  payment,
+  startDate,
+  settleWithLastInstalment = true
+}) {
   const rows = [];
   let balance = principal;
   let cumulativeInterest = 0;
@@ -141,8 +148,10 @@ export function buildSchedule({ principal, rate, periods, payment, startDate }) 
     let capital = round2(payment - interest);
     let instalment = payment;
 
-    // The final instalment settles whatever is left, and takes the drift with it.
-    if (k === periods || capital > balance) {
+    // The final instalment settles whatever is left, and takes the drift with it —
+    // unless the caller has already picked a rate that lands on zero on its own, in
+    // which case every instalment must stay strictly equal (see solveRoundPayment).
+    if (settleWithLastInstalment && (k === periods || capital > balance)) {
       capital = round2(balance);
       instalment = round2(capital + interest);
     }
@@ -168,6 +177,86 @@ export function buildSchedule({ principal, rate, periods, payment, startDate }) 
 }
 
 /**
+ * Balance left after `periods` instalments of exactly `payment`, with no final
+ * adjustment. Negative means the borrower has overpaid, positive that a debt remains.
+ *
+ * Used to hunt for the rates that settle a loan without ever varying the instalment.
+ */
+export function balanceAfterConstantInstalments(principal, periods, payment, rate) {
+  let balance = principal;
+  for (let k = 0; k < periods; k++) {
+    balance = round2(balance - round2(payment - round2(balance * rate)));
+  }
+  return balance;
+}
+
+/**
+ * Finds a rate for which `periods` instalments of exactly `payment` settle the loan to
+ * the cent — no adjusted final instalment, no residue.
+ *
+ * The rate is a continuous parameter while the closing balance only takes values in
+ * whole cents, so the rates that land on zero form an interval rather than a point. The
+ * balance increases with the rate, so bracketing then bisection finds the boundary; but
+ * the balance moves in steps, and a step can jump over zero, so a boundary is accepted
+ * only when it actually lands there. When it does not, no rate settles this instalment
+ * and the caller should try another one.
+ *
+ * @returns {number|null} a settling rate, or null if this instalment admits none
+ */
+export function rateForExactInstalment(principal, periods, payment) {
+  const totalPaid = payment * periods;
+
+  // Instalments that never cover the principal cannot repay it at any rate.
+  if (totalPaid < principal) return null;
+  // Paying back exactly the principal is the interest-free case.
+  if (totalPaid === principal) return 0;
+
+  let hi = 1e-6;
+  while (balanceAfterConstantInstalments(principal, periods, payment, hi) < 0 && hi < 1) {
+    hi *= 2;
+  }
+  if (balanceAfterConstantInstalments(principal, periods, payment, hi) < 0) return null;
+
+  let lo = 0;
+  for (let k = 0; k < 100; k++) {
+    const mid = (lo + hi) / 2;
+    if (balanceAfterConstantInstalments(principal, periods, payment, mid) < 0) lo = mid;
+    else hi = mid;
+  }
+
+  for (const candidate of [hi, (lo + hi) / 2, lo]) {
+    if (balanceAfterConstantInstalments(principal, periods, payment, candidate) === 0) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * Picks the whole-euro instalment nearest to `targetPayment` that some rate settles
+ * exactly, so that every single instalment of the loan is the same round amount.
+ *
+ * Not every whole-euro instalment admits such a rate, so the search walks outwards one
+ * euro at a time. On a tie the lower instalment wins, which is the cheaper of the two
+ * for the borrower.
+ *
+ * @returns {{payment: number, rate: number, offset: number}|null}
+ */
+export function solveRoundPayment({ principal, periods, targetPayment, maxOffset = 24 }) {
+  const start = Math.max(1, Math.round(targetPayment));
+
+  for (let offset = 0; offset <= maxOffset; offset++) {
+    const candidates = offset === 0 ? [start] : [start - offset, start + offset];
+    for (const payment of candidates) {
+      if (payment <= 0) continue;
+      const rate = rateForExactInstalment(principal, periods, payment);
+      if (rate !== null) return { payment, rate, offset };
+    }
+  }
+  return null;
+}
+
+/**
  * Solves the loan from whichever quantity the user knows, and unrolls the schedule.
  * Single entry point so that the UI and the tests exercise the same path.
  *
@@ -179,7 +268,14 @@ export function buildSchedule({ principal, rate, periods, payment, startDate }) 
  * @param {number} [params.periodicRate] periodic rate, when the cost is unknown
  * @returns {object} rate, payment, schedule and solver diagnostics
  */
-export function solveLoan({ principal, periods, startDate, totalCost, periodicRate }) {
+export function solveLoan({
+  principal,
+  periods,
+  startDate,
+  totalCost,
+  periodicRate,
+  roundPayment = false
+}) {
   const rateIsKnown = periodicRate !== undefined;
 
   let rate;
@@ -200,8 +296,31 @@ export function solveLoan({ principal, periods, startDate, totalCost, periodicRa
     ({ rate, iterations, residual, converged } = solved);
   }
 
-  const payment = round2(exactPayment);
-  const schedule = buildSchedule({ principal, rate, periods, payment, startDate });
+  let payment = round2(exactPayment);
+  let settleWithLastInstalment = true;
+  let rounded = null;
+
+  if (roundPayment) {
+    rounded = solveRoundPayment({ principal, periods, targetPayment: exactPayment });
+    if (rounded) {
+      // The rate is no longer the one that matches the requested cost: it is the one
+      // that makes this round instalment come out even. The cost follows from it.
+      rate = rounded.rate;
+      payment = rounded.payment;
+      settleWithLastInstalment = false;
+      residual = 0;
+      converged = true;
+    }
+  }
+
+  const schedule = buildSchedule({
+    principal,
+    rate,
+    periods,
+    payment,
+    startDate,
+    settleWithLastInstalment
+  });
   const effectiveCost = schedule.length
     ? schedule[schedule.length - 1].cumulativeInterest
     : 0;
@@ -221,7 +340,15 @@ export function solveLoan({ principal, periods, startDate, totalCost, periodicRa
     iterations,
     residual,
     converged,
-    rateIsKnown
+    rateIsKnown,
+    // Round-instalment mode: applied tells the UI whether the constraint could be met,
+    // offset how many euros away from the ideal instalment we had to go to meet it.
+    roundPayment: {
+      requested: roundPayment,
+      applied: Boolean(rounded),
+      offset: rounded ? rounded.offset : null,
+      idealPayment: round2(exactPayment)
+    }
   };
 }
 

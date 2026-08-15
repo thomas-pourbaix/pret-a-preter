@@ -15,8 +15,10 @@ import {
   addMonths,
   annualEquivalentRate,
   annualNominalRate,
+  balanceAfterConstantInstalments,
   buildSchedule,
   periodicPayment,
+  rateForExactInstalment,
   round2,
   solveLoan,
   solveRate,
@@ -278,6 +280,88 @@ describe("boundary cases", () => {
 
   it("treats a negative cost as a zero rate rather than diverging", () => {
     expect(solveRate(1_000, -50, 12).rate).toBe(0);
+  });
+});
+
+/* --------------------------------------------------- round-euro instalment mode */
+
+describe("INV-008 — a round instalment never varies", () => {
+  const loans = [
+    [200_000, 240, 52_000],
+    [200_000, 300, 70_000],
+    [80_000, 180, 20_000],
+    [30_000, 84, 4_200],
+    [15_000, 36, 900],
+    [10_000, 60, 1_500],
+    [5_000, 120, 800],
+    [1_000, 12, 60]
+  ];
+
+  const solveRound = (principal, periods, totalCost) =>
+    solveLoan({ principal, periods, totalCost, startDate: START, roundPayment: true });
+
+  it.each(loans)("P=%s n=%s C=%s finds a round instalment", (principal, periods, cost) => {
+    expect(solveRound(principal, periods, cost).roundPayment.applied).toBe(true);
+  });
+
+  it.each(loans)("P=%s n=%s C=%s pays a whole number of euros", (principal, periods, cost) => {
+    expect(Number.isInteger(solveRound(principal, periods, cost).payment)).toBe(true);
+  });
+
+  it.each(loans)("P=%s n=%s C=%s repeats the same amount n times", (principal, periods, cost) => {
+    const { schedule, payment } = solveRound(principal, periods, cost);
+    expect(schedule).toHaveLength(periods);
+    expect(new Set(schedule.map((row) => row.instalment))).toEqual(new Set([payment]));
+    expect(schedule.some((row) => row.adjusted)).toBe(false);
+  });
+
+  it.each(loans)("P=%s n=%s C=%s still settles exactly", (principal, periods, cost) => {
+    const { schedule } = solveRound(principal, periods, cost);
+    expect(schedule[schedule.length - 1].balance).toBe(0);
+  });
+
+  it.each(loans)("P=%s n=%s C=%s conserves capital", (principal, periods, cost) => {
+    const { schedule, principal: p } = solveRound(principal, periods, cost);
+    expect(sum(schedule, "capital")).toBeCloseTo(p, 2);
+  });
+
+  it.each(loans)("P=%s n=%s C=%s costs exactly n × M − P", (principal, periods, cost) => {
+    const solved = solveRound(principal, periods, cost);
+    expect(solved.effectiveCost).toBeCloseTo(solved.payment * periods - principal, 2);
+  });
+
+  it("stays close to the instalment the borrower asked for", () => {
+    for (const [principal, periods, cost] of loans) {
+      expect(solveRound(principal, periods, cost).roundPayment.offset).toBeLessThanOrEqual(3);
+    }
+  });
+});
+
+describe("the round-instalment rate is the one that settles the loan", () => {
+  it("lands the balance on exactly zero, and its neighbours do not", () => {
+    const rate = rateForExactInstalment(200_000, 240, 1_051);
+    expect(rate).not.toBeNull();
+    expect(balanceAfterConstantInstalments(200_000, 240, 1_051, rate)).toBe(0);
+  });
+
+  it("reports no rate when the instalment cannot repay the principal", () => {
+    expect(rateForExactInstalment(200_000, 240, 100)).toBeNull();
+  });
+
+  it("returns a zero rate when the instalments add up to the principal exactly", () => {
+    expect(rateForExactInstalment(120_000, 240, 500)).toBe(0);
+  });
+
+  it("leaves the schedule untouched when the mode is off", () => {
+    const plain = solveLoan({
+      principal: 200_000,
+      periods: 240,
+      totalCost: 52_000,
+      startDate: START
+    });
+    expect(plain.roundPayment.applied).toBe(false);
+    expect(plain.payment).toBe(1_050);
+    expect(plain.schedule[239].instalment).toBe(1_049.96);
   });
 });
 

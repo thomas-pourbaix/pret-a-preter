@@ -48,6 +48,9 @@ oracles indépendants (voir plus bas).
   `capital_amorti = round2(mensualité − intérêts)`.
 - **La dernière échéance absorbe la dérive** : elle solde exactement le capital et se
   trouve donc différer des autres de quelques centimes. Elle est signalée comme ajustée.
+  C'est la convention bancaire française — elle ne gêne pas une banque, qui prélève le
+  montant qu'elle veut, mais elle gêne un particulier qui rembourse par virement permanent.
+  D'où le mode ci-dessous.
 - Taux annuel **nominal** = `i × 12` (taux proportionnel, convention des offres de prêt
   françaises). Taux annuel **équivalent** (actuariel) = `(1 + i)^12 − 1`. Les deux sont
   affichés, jamais confondus.
@@ -56,6 +59,34 @@ oracles indépendants (voir plus bas).
 
 Hors périmètre en v1 : assurance, remboursements anticipés, différé d'amortissement, taux
 variable, prêts in fine, multi-lignes, paliers de mensualité.
+
+## Mensualité en euros ronds
+
+Mode **actif par défaut**, pensé pour le prêt entre particuliers remboursé par virement
+permanent : la mensualité est un nombre entier d'euros, **identique sur les `n` échéances
+sans exception**, et le prêt se solde quand même à `0,00 €`.
+
+Ce n'est pas un tour de passe-passe. Le taux est un paramètre **continu**, alors que le
+solde final ne prend que des valeurs en centimes : pour une mensualité entière donnée, les
+taux qui soldent exactement forment donc un intervalle. On cherche cet intervalle par
+dichotomie ; quand il est vide — un pas peut enjamber zéro — on essaie la mensualité entière
+suivante, un euro à la fois.
+
+En pratique, un écart de 0 à 3 € par rapport à la mensualité idéale suffit toujours :
+
+| Prêt | Mensualité idéale | Mensualité ronde | Taux retenu | Coût |
+|---|---|---|---|---|
+| 200 000 € / 240 mois | 1 050,00 € | **1 051 €** | 2,4094 % | 52 240 € |
+| 200 000 € / 300 mois | 900,00 € | **900 €** | 2,5274 % | 70 000 € |
+| 80 000 € / 180 mois | 555,56 € | **556 €** | 3,0917 % | 20 080 € |
+| 10 000 € / 60 mois | 191,67 € | **192 €** | 5,7138 % | 1 520 € |
+
+La contrepartie est que **le coût total n'est plus celui saisi** : il vaut exactement
+`n × M − P`. Le déplacement de la mensualité, le taux retenu et le nouveau coût sont
+affichés en toutes lettres sous le bloc de résolution.
+
+Décocher la case rend la convention bancaire : mensualité au centime, dernière échéance
+ajustée.
 
 ## Tests
 

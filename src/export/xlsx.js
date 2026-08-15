@@ -69,16 +69,23 @@ export function buildWorkbook(solved) {
       { value: "Taux mensuel", type: String },
       { value: rate, type: Number, format: RATE_MONTHLY },
       {
-        value: rateIsKnown
-          ? "taux annuel nominal / 12"
-          : `résolu par dichotomie, ${iterations} itérations`,
+        value: solved.roundPayment.applied
+          ? "choisi pour que la mensualité ronde solde exactement"
+          : rateIsKnown
+            ? "taux annuel nominal / 12"
+            : `résolu par dichotomie, ${iterations} itérations`,
         type: String
       }
     ],
     [
       { value: "Mensualité (€)", type: String },
       money(payment),
-      { value: "arrondie au centime", type: String }
+      {
+        value: solved.roundPayment.applied
+          ? "euros ronds, identique sur les " + periods + " échéances"
+          : "arrondie au centime, dernière échéance ajustée",
+        type: String
+      }
     ],
     [
       { value: "Taux annuel nominal", type: String },
@@ -103,7 +110,12 @@ export function buildWorkbook(solved) {
     [
       { value: "Écart d'arrondi (€)", type: String },
       money(costDrift),
-      { value: "coût effectif − hypothèse, dû aux arrondis au centime", type: String }
+      {
+        value: solved.roundPayment.applied
+          ? "coût effectif − hypothèse, dû à la mensualité en euros ronds"
+          : "coût effectif − hypothèse, dû aux arrondis au centime",
+        type: String
+      }
     ],
     [
       { value: "Première échéance", type: String },
