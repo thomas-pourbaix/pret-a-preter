@@ -352,7 +352,23 @@ section{margin-bottom:22px}
       <svg id="chart" viewBox="0 0 960 260" style="width:100%;height:260px;display:block"
            role="img" tabindex="0"
            aria-label="Un bâton par mensualité, partagé entre intérêts et capital amorti. Flèches gauche et droite pour parcourir les échéances."></svg>
-      <p class="probe" id="probe" aria-live="polite">Survolez un bâton, ou parcourez-les au clavier, pour lire une échéance.</p>
+      <p class="probe" id="probe" aria-live="polite">Survolez le graphique, ou parcourez-le au clavier, pour lire une échéance.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Extinction de la dette</h2>
+      <div class="chart-legend">
+        <span class="chip"><i style="background:#1F6F78"></i>Capital restant dû</span>
+        <span class="chip"><i style="background:#6A4CA8"></i>Intérêts cumulés</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <svg id="chart-balance" viewBox="0 0 960 260" style="width:100%;height:260px;display:block"
+           role="img" tabindex="0"
+           aria-label="Capital restant dû et intérêts cumulés en escalier, une marche par échéance. Flèches gauche et droite pour parcourir les échéances."></svg>
+      <p class="probe" id="probe-balance" aria-live="polite">Survolez le graphique, ou parcourez-le au clavier, pour lire une échéance.</p>
     </div>
   </section>
 

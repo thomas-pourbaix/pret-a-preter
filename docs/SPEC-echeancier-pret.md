@@ -93,15 +93,24 @@ d'en déduire le coût. Même moteur, même échéancier, sens de résolution in
 Regroupement par année civile avec ligne de sous-total, et deux vues : détail mensuel /
 synthèse annuelle seule.
 
-**Graphique** : un **bâton par mensualité**, empilé — intérêts en bas, capital amorti
-au-dessus — l'échelle verticale étant la mensualité elle-même. Lecture au survol et au
-clavier (échéance pointée, mensualité, intérêts et leur part, capital, reste dû).
+**Graphiques**, deux, tous deux en escalier — jamais de courbe lissée, parce qu'une
+courbe lisse suggère une variation continue alors que rien ne bouge entre deux échéances :
 
-> **Révisé le 15 août 2026.** La version initiale demandait deux courbes, capital restant
-> dû et intérêts cumulés sur le même axe. Le diagramme en bâtons répond mieux à la
-> question qu'on se pose devant un échéancier — « où part mon argent ce mois-ci ? » — et
-> il rend visible d'un coup d'œil la propriété du mode §4.3 bis : quand toutes les
-> mensualités sont égales, le sommet des bâtons est parfaitement plat.
+1. **Composition de chaque échéance** : un bâton par mensualité, empilé, intérêts en bas
+   et capital amorti au-dessus, bâtons jointifs. L'échelle verticale est la mensualité
+   elle-même, donc le sommet est plat dès que la mensualité est constante.
+2. **Extinction de la dette** : capital restant dû qui descend, intérêts cumulés qui
+   montent, chacun en marches d'escalier — le niveau tient tout le mois et saute à la
+   date d'échéance.
+
+Les deux se lisent au survol et au clavier (flèches, Home, Fin ; Maj pour sauter d'un an).
+
+> **Révisé le 15 août 2026.** La version initiale demandait deux courbes lissées sur un
+> seul graphique. Le découpage en deux répond à deux questions distinctes — « où part mon
+> argent ce mois-ci ? » et « où en suis-je ? » — que le graphique unique mélangeait sur
+> une échelle commune où les intérêts cumulés écrasaient tout. Le premier rend en outre
+> visible la propriété du mode §4.3 bis : mensualités toutes égales, sommet parfaitement
+> plat.
 
 **Exports** :
 

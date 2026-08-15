@@ -1,13 +1,13 @@
 /**
- * One bar per instalment, split into what goes to interest and what actually repays the
- * loan. The bar height is the instalment itself, so a constant-instalment loan draws a
- * flat top — and the round-euro mode draws a perfectly flat one, which is the whole
- * point of that mode made visible.
+ * Two views of the same schedule, both drawn as staircases so that every instalment is
+ * a visible step rather than a point on a smoothed curve:
  *
- * Deliberately not a charting library: bars, four gridlines and a probe come to about a
- * hundred and fifty lines, where the lightest chart library would outweigh the rest of
- * the page. Each series is drawn as a single path made of rectangle subpaths rather than
- * one node per bar, so a 1200-instalment loan stays two DOM nodes instead of 2400.
+ *   renderInstalmentChart — one bar per instalment, split interest / capital amorti.
+ *   renderBalanceChart    — outstanding capital falling, cumulative interest rising.
+ *
+ * Deliberately not a charting library: the two together come to about two hundred lines,
+ * where the lightest chart library would outweigh the rest of the page, and every
+ * coordinate here can be read and checked.
  */
 
 import { formatEuro, formatEuroRounded, formatMonth } from "../core/format.js";
@@ -20,41 +20,12 @@ const PADDING = { top: 14, right: 84, bottom: 24, left: 14 };
 const COLOUR_CAPITAL = "#1F6F78";
 const COLOUR_INTEREST = "#6A4CA8";
 
-const PROBE_IDLE = "Survolez un bâton, ou parcourez-les au clavier, pour lire une échéance.";
+const PROBE_IDLE = "Survolez le graphique, ou parcourez-le au clavier, pour lire une échéance.";
 
-/**
- * @param {object} params
- * @param {SVGElement} params.svg target element, cleared on each render
- * @param {HTMLElement} params.probe text line updated on hover and on keyboard focus
- * @param {Array<object>} params.schedule rows from buildSchedule()
- */
-export function renderChart({ svg, probe, schedule }) {
-  svg.replaceChildren();
+/* ------------------------------------------------------------------------ plumbing */
 
-  if (!schedule.length) {
-    probe.textContent = PROBE_IDLE;
-    return;
-  }
-
-  const plotWidth = WIDTH - PADDING.left - PADDING.right;
-  const plotHeight = HEIGHT - PADDING.top - PADDING.bottom;
-  const baseline = HEIGHT - PADDING.bottom;
-
-  // The tallest instalment sets the scale: in the banking convention the adjusted last
-  // one can differ, and it should not overflow the plot.
-  const maxInstalment = Math.max(...schedule.map((row) => row.instalment));
-  // The bars keep their gap even when they get thin, so that a long loan still reads as
-  // one bar per instalment rather than as an area. Sub-pixel gaps would turn into a
-  // moiré under anti-aliasing, hence the crispEdges below, which snaps every bar to the
-  // pixel grid. Under about two pixels a slot there is no room left for a gap at all.
-  const slot = plotWidth / schedule.length;
-  const gap = slot < 2 ? 0 : Math.min(slot * 0.18, 6);
-  const barWidth = slot - gap;
-
-  const yAt = (value) => baseline - (value / maxInstalment) * plotHeight;
-  const xAt = (index) => PADDING.left + index * slot + (slot - barWidth) / 2;
-
-  const add = (tag, attributes, text) => {
+function painter(svg) {
+  return (tag, attributes, text) => {
     const node = document.createElementNS(SVG_NS, tag);
     for (const [name, value] of Object.entries(attributes)) {
       node.setAttribute(name, value);
@@ -63,6 +34,11 @@ export function renderChart({ svg, probe, schedule }) {
     svg.appendChild(node);
     return node;
   };
+}
+
+/** Four gridlines and the value axis down the right-hand side. */
+function drawScale(add, maxValue) {
+  const plotHeight = HEIGHT - PADDING.top - PADDING.bottom;
 
   for (let step = 0; step <= 4; step++) {
     const y = PADDING.top + (step / 4) * plotHeight;
@@ -70,73 +46,34 @@ export function renderChart({ svg, probe, schedule }) {
     add(
       "text",
       { x: WIDTH - PADDING.right + 8, y: y + 3, class: "axis" },
-      formatEuroRounded(maxInstalment * (1 - step / 4))
+      formatEuroRounded(maxValue * (1 - step / 4))
     );
   }
+}
 
-  // Each series is one path: "move to the corner, across, down, back, close" per bar.
-  const barsPath = (top, bottom) =>
-    schedule
-      .map((row, index) => {
-        const x = xAt(index);
-        const yTop = yAt(top(row));
-        const height = Math.max(0.4, yAt(bottom(row)) - yTop);
-        return `M${x.toFixed(2)} ${yTop.toFixed(2)}h${barWidth.toFixed(2)}v${height.toFixed(2)}h${(-barWidth).toFixed(2)}z`;
-      })
-      .join("");
-
-  add("path", {
-    d: barsPath((row) => row.interest, () => 0),
-    fill: COLOUR_INTEREST,
-    "shape-rendering": "crispEdges"
-  });
-  add("path", {
-    d: barsPath((row) => row.interest + row.capital, (row) => row.interest),
-    fill: COLOUR_CAPITAL,
-    "shape-rendering": "crispEdges"
-  });
-
+function drawDateAxis(add, schedule) {
   add("text", { x: PADDING.left, y: HEIGHT - 8, class: "axis" }, formatMonth(schedule[0].date));
   add(
     "text",
-    {
-      x: WIDTH - PADDING.right,
-      y: HEIGHT - 8,
-      class: "axis",
-      "text-anchor": "end"
-    },
+    { x: WIDTH - PADDING.right, y: HEIGHT - 8, class: "axis", "text-anchor": "end" },
     formatMonth(schedule[schedule.length - 1].date)
   );
+}
 
-  const highlight = add("rect", {
-    x: 0,
-    y: PADDING.top,
-    width: Math.max(barWidth, 2),
-    height: plotHeight,
-    fill: "#17262B",
-    opacity: 0
-  });
-
+/**
+ * Pointer and keyboard reading, identical on both charts: the caller says how to move
+ * the marker and what to write in the probe line.
+ */
+function attachReading({ svg, probe, schedule, slot, show, hide }) {
   let index = 0;
 
   const showAt = (next) => {
     index = Math.max(0, Math.min(schedule.length - 1, next));
-    const row = schedule[index];
-
-    highlight.setAttribute("x", xAt(index) - (Math.max(barWidth, 2) - barWidth) / 2);
-    highlight.setAttribute("opacity", "0.09");
-
-    const interestShare = (row.interest / row.instalment) * 100;
-    probe.textContent =
-      `Échéance ${row.number} (${formatMonth(row.date)}) · ` +
-      `mensualité ${formatEuro(row.instalment)} = ` +
-      `intérêts ${formatEuro(row.interest)} (${interestShare.toFixed(0)} %) + ` +
-      `capital ${formatEuro(row.capital)} · ` +
-      `reste dû ${formatEuro(row.balance)}`;
+    show(index, schedule[index]);
   };
 
-  const hide = () => {
-    highlight.setAttribute("opacity", "0");
+  const clear = () => {
+    hide();
     probe.textContent = PROBE_IDLE;
   };
 
@@ -146,10 +83,10 @@ export function renderChart({ svg, probe, schedule }) {
     showAt(Math.floor((x - PADDING.left) / slot));
   });
 
-  svg.addEventListener("pointerleave", hide);
-  svg.addEventListener("blur", hide);
+  svg.addEventListener("pointerleave", clear);
+  svg.addEventListener("blur", clear);
 
-  // The bars are reachable and readable without a pointer (§8).
+  // Readable without a pointer (§8).
   svg.addEventListener("keydown", (event) => {
     const jump = event.shiftKey ? 12 : 1;
     const moves = {
@@ -165,4 +102,191 @@ export function renderChart({ svg, probe, schedule }) {
   });
 
   probe.textContent = PROBE_IDLE;
+}
+
+/* --------------------------------------------------------- chart 1: instalments */
+
+/**
+ * One bar per instalment, interest at the bottom and capital above, bars touching.
+ *
+ * Drawn as two staircase areas rather than as one rectangle per instalment: adjacent
+ * rectangles of the same fill leave hairline seams where their anti-aliased edges meet,
+ * and a 240-instalment loan turns those seams into a moiré. A single closed outline has
+ * no interior edges to seam, and is one path node instead of 240.
+ *
+ * @param {object} params
+ * @param {SVGElement} params.svg target element, cleared on each render
+ * @param {HTMLElement} params.probe text line updated on hover and on keyboard focus
+ * @param {Array<object>} params.schedule rows from buildSchedule()
+ */
+export function renderInstalmentChart({ svg, probe, schedule }) {
+  svg.replaceChildren();
+  if (!schedule.length) {
+    probe.textContent = PROBE_IDLE;
+    return;
+  }
+
+  const add = painter(svg);
+  const plotWidth = WIDTH - PADDING.left - PADDING.right;
+  const plotHeight = HEIGHT - PADDING.top - PADDING.bottom;
+  const baseline = HEIGHT - PADDING.bottom;
+
+  // The tallest instalment sets the scale: under the banking convention the adjusted
+  // final one differs, and it must not overflow the plot.
+  const maxInstalment = Math.max(...schedule.map((row) => row.instalment));
+  const slot = plotWidth / schedule.length;
+
+  const yAt = (value) => baseline - (value / maxInstalment) * plotHeight;
+  const xAt = (index) => PADDING.left + index * slot;
+
+  drawScale(add, maxInstalment);
+
+  // Forward along the top staircase, back along the bottom one, then close.
+  const stepArea = (top, bottom) => {
+    const forward = [];
+    const backward = [];
+
+    schedule.forEach((row, index) => {
+      const left = xAt(index).toFixed(2);
+      const right = xAt(index + 1).toFixed(2);
+      forward.push(`${index ? "L" : "M"}${left} ${yAt(top(row)).toFixed(2)}`, `L${right} ${yAt(top(row)).toFixed(2)}`);
+      backward.unshift(`L${left} ${yAt(bottom(row)).toFixed(2)}`);
+      backward.unshift(`L${right} ${yAt(bottom(row)).toFixed(2)}`);
+    });
+
+    return [...forward, ...backward, "Z"].join("");
+  };
+
+  add("path", { d: stepArea((row) => row.interest, () => 0), fill: COLOUR_INTEREST });
+  add("path", {
+    d: stepArea((row) => row.interest + row.capital, (row) => row.interest),
+    fill: COLOUR_CAPITAL
+  });
+
+  drawDateAxis(add, schedule);
+
+  const marker = add("rect", {
+    x: 0,
+    y: PADDING.top,
+    width: Math.max(slot, 2),
+    height: plotHeight,
+    fill: "#17262B",
+    opacity: 0
+  });
+
+  attachReading({
+    svg,
+    probe,
+    schedule,
+    slot,
+    hide: () => marker.setAttribute("opacity", "0"),
+    show: (index, row) => {
+      marker.setAttribute("x", xAt(index));
+      marker.setAttribute("opacity", "0.14");
+
+      const share = (row.interest / row.instalment) * 100;
+      probe.textContent =
+        `Échéance ${row.number} (${formatMonth(row.date)}) · ` +
+        `mensualité ${formatEuro(row.instalment)} = ` +
+        `intérêts ${formatEuro(row.interest)} (${share.toFixed(0)} %) + ` +
+        `capital ${formatEuro(row.capital)}`;
+    }
+  });
+}
+
+/* ------------------------------------------------------------- chart 2: balances */
+
+/**
+ * Outstanding capital falling against cumulative interest rising, both as staircases:
+ * the level holds for the whole month and drops, or climbs, on the instalment date.
+ * A smoothed line would suggest the balance changes continuously, which it does not.
+ *
+ * @param {object} params
+ * @param {SVGElement} params.svg target element, cleared on each render
+ * @param {HTMLElement} params.probe text line updated on hover and on keyboard focus
+ * @param {Array<object>} params.schedule rows from buildSchedule()
+ * @param {number} params.principal borrowed amount, the starting level of the staircase
+ */
+export function renderBalanceChart({ svg, probe, schedule, principal }) {
+  svg.replaceChildren();
+  if (!schedule.length) {
+    probe.textContent = PROBE_IDLE;
+    return;
+  }
+
+  const add = painter(svg);
+  const plotWidth = WIDTH - PADDING.left - PADDING.right;
+  const plotHeight = HEIGHT - PADDING.top - PADDING.bottom;
+  const baseline = HEIGHT - PADDING.bottom;
+
+  const lastRow = schedule[schedule.length - 1];
+  const maxValue = Math.max(principal, lastRow.cumulativeInterest) || 1;
+  const slot = plotWidth / schedule.length;
+
+  const yAt = (value) => baseline - (value / maxValue) * plotHeight;
+  const xAt = (index) => PADDING.left + index * slot;
+
+  drawScale(add, maxValue);
+
+  // The level holds across the month, then steps on the payment: horizontal, vertical,
+  // horizontal. `start` is the level before the first instalment.
+  const staircase = (start, valueOf) => {
+    const parts = [`M${xAt(0).toFixed(2)} ${yAt(start).toFixed(2)}`];
+    let level = start;
+
+    schedule.forEach((row, index) => {
+      const right = xAt(index + 1).toFixed(2);
+      parts.push(`L${right} ${yAt(level).toFixed(2)}`);
+      level = valueOf(row);
+      parts.push(`L${right} ${yAt(level).toFixed(2)}`);
+    });
+
+    return parts.join("");
+  };
+
+  const line = (d, colour) =>
+    add("path", {
+      d,
+      fill: "none",
+      stroke: colour,
+      "stroke-width": 2,
+      "stroke-linejoin": "miter",
+      "vector-effect": "non-scaling-stroke"
+    });
+
+  line(staircase(principal, (row) => row.balance), COLOUR_CAPITAL);
+  line(staircase(0, (row) => row.cumulativeInterest), COLOUR_INTEREST);
+
+  drawDateAxis(add, schedule);
+
+  const cursor = add("line", {
+    x1: 0,
+    x2: 0,
+    y1: PADDING.top,
+    y2: baseline,
+    stroke: "#93A6AB",
+    "stroke-width": 1,
+    "stroke-dasharray": "3 3",
+    opacity: 0
+  });
+
+  attachReading({
+    svg,
+    probe,
+    schedule,
+    slot,
+    hide: () => cursor.setAttribute("opacity", "0"),
+    show: (index, row) => {
+      const x = xAt(index + 1);
+      cursor.setAttribute("x1", x);
+      cursor.setAttribute("x2", x);
+      cursor.setAttribute("opacity", "1");
+
+      probe.textContent =
+        `Échéance ${row.number} (${formatMonth(row.date)}) · ` +
+        `reste dû ${formatEuro(row.balance)} · ` +
+        `intérêts cumulés ${formatEuro(row.cumulativeInterest)} · ` +
+        `capital remboursé ${formatEuro(row.cumulativeCapital)}`;
+    }
+  });
 }

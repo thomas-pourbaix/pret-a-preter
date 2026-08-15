@@ -13,7 +13,7 @@ import {
 } from "../core/format.js";
 import { exportCsv } from "../export/csv.js";
 import { exportXlsx } from "../export/xlsx.js";
-import { renderChart } from "./chart.js";
+import { renderBalanceChart, renderInstalmentChart } from "./chart.js";
 import { renderTable } from "./table.js";
 
 const MAX_PERIODS = 1200;
@@ -111,7 +111,7 @@ function compute() {
       el(id).hidden = true;
     }
     renderTable({ tbody: el("tbody"), schedule: [], view: state.view });
-    renderChart({ svg: el("chart"), probe: el("probe"), schedule: [] });
+    renderCharts([], 0);
     return;
   }
 
@@ -130,7 +130,17 @@ function compute() {
   setExportsEnabled(true);
   renderReadout();
   renderTable({ tbody: el("tbody"), schedule: state.solved.schedule, view: state.view });
-  renderChart({ svg: el("chart"), probe: el("probe"), schedule: state.solved.schedule });
+  renderCharts(state.solved.schedule, state.solved.principal);
+}
+
+function renderCharts(schedule, principal) {
+  renderInstalmentChart({ svg: el("chart"), probe: el("probe"), schedule });
+  renderBalanceChart({
+    svg: el("chart-balance"),
+    probe: el("probe-balance"),
+    schedule,
+    principal
+  });
 }
 
 /* ------------------------------------------------------------------------ readout */
