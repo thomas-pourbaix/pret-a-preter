@@ -31,7 +31,7 @@ import {
   formatSteppedPercent
 } from "../../core/format.js";
 import { spellEuros } from "../../core/words.js";
-import { APP_NAME, VERSION } from "../../core/version.js";
+import { APP_NAME, APP_TAGLINE, VERSION } from "../../core/version.js";
 import { scheduleGroups } from "../../core/schedule-columns.js";
 import { A4, createDocument } from "./document.js";
 
@@ -954,6 +954,7 @@ export function renderDeed(solved, { now } = {}) {
   const doc = createDocument({
     title: `Reconnaissance de dette — ${euros(loan.principal)}`,
     subject: `Prêt de ${euros(loan.principal)} remboursable en ${loan.periods} mensualités`,
+    producer: `${APP_NAME} v${VERSION} — ${APP_TAGLINE}`,
     now
   });
   const flow = createFlow(doc);
@@ -992,7 +993,7 @@ export function buildDeed(solved, options) {
  * @param {string} filename
  * @param {{now?: Date}} [options]
  */
-export function exportDeedPdf(solved, filename = "reconnaissance-de-dette.pdf", options) {
+export function exportDeedPdf(solved, filename = "pret-a-preter-reconnaissance-de-dette.pdf", options) {
   if (!solved || !solved.schedule.length) return;
 
   const blob = new Blob([buildDeed(solved, options)], { type: "application/pdf" });

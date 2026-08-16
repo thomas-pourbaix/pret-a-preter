@@ -78,6 +78,7 @@ function pdfDate(date) {
  * @param {object} [options]
  * @param {string} [options.title] shown by the viewer in its title bar
  * @param {string} [options.subject]
+ * @param {string} [options.producer] what wrote the file, for the information dictionary
  * @param {Date} [options.now] creation date; injectable so tests get identical bytes
  * @param {{width: number, height: number}} [options.size]
  * @returns {object} the drawing API
@@ -85,6 +86,7 @@ function pdfDate(date) {
 export function createDocument({
   title = "",
   subject = "",
+  producer = "générateur PDF intégré",
   now = new Date(),
   size = A4
 } = {}) {
@@ -235,7 +237,7 @@ export function createDocument({
     );
     const infoId = add(
       `<< /Title (${textString(title)}) /Subject (${textString(subject)}) ` +
-        `/Producer (${textString("echeancier-pret — generateur PDF integre")}) ` +
+        `/Producer (${textString(producer)}) ` +
         `/CreationDate (${pdfDate(now)}) >>`
     );
 

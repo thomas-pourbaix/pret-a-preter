@@ -12,7 +12,7 @@
  *
  * Bumped once per round of deployed changes.
  */
-export const VERSION = "0.3.0";
+export const VERSION = "0.3.1";
 
 /**
  * What produced the file, spelled out.
@@ -23,7 +23,17 @@ export const VERSION = "0.3.0";
  * project produces therefore carries the name of the application beside the version, so
  * that a figure questioned later leads back here.
  */
-export const APP_NAME = "Échéancier de prêt entre particuliers";
+export const APP_NAME = "Prêt à prêter";
 
-/** Name and version as one string, the form the exports print. */
-export const GENERATED_BY = `généré par l'application ${APP_NAME} — version ${VERSION}`;
+/**
+ * What the name does not say.
+ *
+ * A name is what one remembers; it is not what one recognises on a document received from
+ * someone else. « Prêt à prêter » alone, in the footer of a deed, could be anything — so the
+ * exports print the trade beside the name, once, and the name carries the rest.
+ */
+export const APP_TAGLINE = "échéancier de prêt entre particuliers";
+
+/** Name, trade and version as one string, the form the exports print. */
+export const GENERATED_BY =
+  `généré par l'application ${APP_NAME} — ${APP_TAGLINE} — version ${VERSION}`;

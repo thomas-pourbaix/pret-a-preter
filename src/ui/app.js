@@ -641,7 +641,7 @@ async function downloadXlsx() {
   try {
     button.disabled = true;
     button.textContent = "Génération…";
-    await exportXlsx(state.solved, "echeancier-pret.xlsx", exportOptions());
+    await exportXlsx(state.solved, "pret-a-preter-echeancier.xlsx", exportOptions());
   } catch (error) {
     const box = el("error");
     box.hidden = false;
@@ -658,7 +658,7 @@ async function downloadXlsx() {
  */
 function downloadDeed() {
   try {
-    exportDeedPdf(state.solved, "reconnaissance-de-dette.pdf");
+    exportDeedPdf(state.solved, "pret-a-preter-reconnaissance-de-dette.pdf");
   } catch (error) {
     const box = el("error");
     box.hidden = false;
@@ -772,7 +772,7 @@ function init() {
   el("view-monthly").addEventListener("click", () => setView("monthly"));
   el("view-yearly").addEventListener("click", () => setView("yearly"));
   el("export-csv").addEventListener("click", () =>
-    exportCsv(state.solved, "echeancier-pret.csv", exportOptions())
+    exportCsv(state.solved, "pret-a-preter-echeancier.csv", exportOptions())
   );
   el("export-xlsx").addEventListener("click", downloadXlsx);
   el("export-pdf").addEventListener("click", downloadDeed);

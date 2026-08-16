@@ -1,6 +1,8 @@
-# Échéancier de prêt amortissable
+# Prêt à prêter
 
-**En ligne : <https://thomas-pourbaix.github.io/loan-schedule/>**
+*Échéancier de prêt amortissable entre particuliers.*
+
+**En ligne : <https://thomas-pourbaix.github.io/pret-a-preter/>**
 
 Application web statique qui résout le **taux** d'un prêt amortissable à partir de trois
 hypothèses connues — capital emprunté, durée, coût cumulé des intérêts — puis déroule
@@ -331,7 +333,7 @@ dossier `/ (root)`.
 **Branche servie : `main`**, à la racine — vérifiable à tout moment :
 
 ```bash
-gh api repos/:owner/loan-schedule/pages
+gh api repos/:owner/pret-a-preter/pages
 ```
 
 Les modules ES sont servis avec leur propre `cache-control: max-age=600`, indépendamment du
@@ -339,7 +341,7 @@ HTML : on peut donc lire un `index.html` neuf accompagné d'un `app.js` vieux de
 D'où la version en pied de page — et, en cas de doute, la comparaison directe :
 
 ```bash
-diff <(curl -sS https://thomas-pourbaix.github.io/loan-schedule/src/ui/app.js) src/ui/app.js
+diff <(curl -sS https://thomas-pourbaix.github.io/pret-a-preter/src/ui/app.js) src/ui/app.js
 ```
 
 Tous les chemins de la page sont relatifs (`./src/…`, `./vendor/…`), ce qui permet de

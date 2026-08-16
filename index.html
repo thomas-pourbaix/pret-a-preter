@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Échéancier — prêt amortissable</title>
+<title>Prêt à prêter — échéancier de prêt amortissable</title>
 <meta name="description" content="Calculer un prêt entre particuliers : à partir de la somme, de la durée et du coût convenu — taux ou cumul d'intérêts — la mensualité en euros ronds et l'échéancier mois par mois, exportables en tableur.">
 
 <style>
@@ -85,7 +85,21 @@ body{
   font-size:clamp(30px,5vw,46px);line-height:1.05;margin:0;letter-spacing:-.015em;
 }
 .masthead h1 em{font-style:normal;color:var(--interest)}
+.wordmark{
+  font-family:var(--display);font-weight:600;font-size:20px;letter-spacing:-.01em;
+  margin:0 0 18px;color:var(--ink);
+}
+.wordmark::before{
+  content:"";display:inline-block;vertical-align:.12em;
+  width:10px;height:10px;margin-right:9px;border-radius:50%;
+  border:2px solid var(--interest);
+}
 .statement{margin:14px 0 0;max-width:56ch;color:var(--ink-soft);font-size:16px}
+.round-euros{
+  margin:16px 0 0;max-width:56ch;padding-left:14px;border-left:2px solid var(--interest);
+  color:var(--ink-soft);font-size:15px;
+}
+.round-euros strong{color:var(--ink);font-weight:600}
 .eyebrow{
   font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--ink-faint);margin:0 0 10px;
@@ -354,9 +368,11 @@ section{margin-bottom:22px}
 <div class="wrap">
 
   <header class="masthead">
+    <p class="wordmark">Prêt à prêter</p>
     <p class="eyebrow">Prêt amortissable · mensualités constantes</p>
     <h1>Le prêt entre particuliers,<br>chiffré <em>échéance par échéance</em>.</h1>
     <p class="statement">Deux personnes s'accordent sur une somme, une durée et ce que l'emprunt coûtera — un taux, ou un cumul d'intérêts. Cet outil part de l'un ou de l'autre, en tire une mensualité en euros ronds identique du premier au dernier mois, déroule chaque échéance et exporte le tout en tableur. Aucune convention n'est implicite : elles sont toutes écrites en bas de page.</p>
+    <p class="round-euros">Ici, <strong>on parle en euros, pas en centimes</strong>, parce qu'un prêt entre proches se négocie et se rembourse ainsi : la somme se saisit par tranches de 10 €, le taux par pas de 0,05 point, et la mensualité est un nombre entier d'euros — le montant exact d'un virement permanent, identique du premier au dernier mois. Les centimes ne reviennent que dans le détail de l'échéancier, où intérêts et capital se lisent au centime près.</p>
   </header>
 
   <section class="solver">
@@ -618,7 +634,7 @@ section{margin-bottom:22px}
     </p>
     <p style="margin-top:10px;font-size:12.5px">
       Logiciel libre sous <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a> —
-      <a href="https://github.com/thomas-pourbaix/loan-schedule">code source sur GitHub</a>.
+      <a href="https://github.com/thomas-pourbaix/pret-a-preter">code source sur GitHub</a>.
       <!-- Written by app.js from src/core/version.js: one source, and a page served from a
            stale cache is recognisable on sight. The exported PDF carries the same string. -->
       <span id="app-version" class="version"></span>

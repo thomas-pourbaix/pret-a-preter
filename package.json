@@ -1,9 +1,9 @@
 {
-  "name": "loan-schedule",
-  "version": "0.3.0",
+  "name": "pret-a-preter",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
-  "description": "Amortizing loan schedule: solves the periodic rate from principal, term and total cost, then unrolls an auditable repayment schedule. Runs entirely in the browser.",
+  "description": "Prêt à prêter — amortizing loan schedule for lending between private individuals: solves the periodic rate from principal, term and total cost, then unrolls an auditable repayment schedule. Runs entirely in the browser.",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "test": "vitest run",

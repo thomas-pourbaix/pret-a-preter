@@ -11,7 +11,7 @@
 
 ## 1. Où en est le projet
 
-Application web statique **en production** : <https://thomas-pourbaix.github.io/loan-schedule/>
+Application web statique **en production** : <https://thomas-pourbaix.github.io/pret-a-preter/>
 
 Deux personnes s'accordent sur une somme, une durée et ce que l'emprunt coûtera — un taux
 ou un cumul d'intérêts. L'outil part de l'un ou de l'autre, en tire une **mensualité en
@@ -20,11 +20,11 @@ euros ronds**, déroule l'échéancier et l'exporte.
 | | |
 |---|---|
 | Dépôt local | `/Users/thomaspourbaix/Claude_workspace/Perso/Prêts entre particuliers/appli_calcul_mensualités` |
-| Dépôt distant | <https://github.com/thomas-pourbaix/loan-schedule> (public, AGPL-3.0) |
+| Dépôt distant | <https://github.com/thomas-pourbaix/pret-a-preter> (public, AGPL-3.0) |
 | Branche de travail | `main` |
-| Pages sert | `main`, à la racine (vérifié : `gh api repos/:owner/loan-schedule/pages`) |
+| Pages sert | `main`, à la racine (vérifié : `gh api repos/:owner/pret-a-preter/pages`) |
 | Tests | 263, tous verts (`npx vitest run`) |
-| Version | `0.3.0`, dans `src/core/version.js` — incrémentée à chaque tour déployé |
+| Version | `0.3.1`, dans `src/core/version.js` — incrémentée à chaque tour déployé |
 | Dernier commit | celui qui porte l'export PDF (§9) et le quatrième tour (§10) |
 
 Le chemin local contient des accents et des espaces : **le quoter systématiquement** en bash.
@@ -134,7 +134,7 @@ vieux de dix minutes, et voir une interface incohérente. Ça a produit deux fau
 Avant de conclure quoi que ce soit sur un affichage :
 
 ```bash
-diff <(curl -sS https://thomas-pourbaix.github.io/loan-schedule/src/ui/app.js) src/ui/app.js
+diff <(curl -sS https://thomas-pourbaix.github.io/pret-a-preter/src/ui/app.js) src/ui/app.js
 ```
 
 **Le bundle `write-excel-file` sous Node.** `node -e` ne déclenche pas la branche UMD qui

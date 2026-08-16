@@ -13,7 +13,7 @@
  * wrapped header with no row height set is clipped to one line by the spreadsheet.
  */
 
-import { APP_NAME, VERSION } from "../core/version.js";
+import { APP_NAME, APP_TAGLINE, VERSION } from "../core/version.js";
 import {
   columnHeading,
   scheduleColumns,
@@ -383,7 +383,7 @@ export function buildWorkbook(solved, { constantEuros = true } = {}) {
     // What produced the file, and which build of it. A workbook outlives the tab it was
     // exported from — it is mailed, filed, reopened by the other party — and a figure
     // questioned six months later is only checkable against a named tool and a version.
-    [label("Généré par"), label(`${APP_NAME} — version ${VERSION}`), note("application web")]
+    [label("Généré par"), label(`${APP_NAME} — version ${VERSION}`), note(APP_TAGLINE)]
   ];
 
   const columns = scheduleColumns({ constantEuros });
@@ -449,7 +449,7 @@ function round2(value) {
  * @param {{constantEuros?: boolean}} [options]
  * @param {Function} [writer] injectable write-excel-file entry point
  */
-export async function exportXlsx(solved, filename = "echeancier-pret.xlsx", options, writer) {
+export async function exportXlsx(solved, filename = "pret-a-preter-echeancier.xlsx", options, writer) {
   const write = writer || globalThis.writeXlsxFile;
   if (typeof write !== "function") {
     throw new Error("write-excel-file is not loaded");

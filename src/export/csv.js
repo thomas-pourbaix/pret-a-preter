@@ -69,7 +69,7 @@ export function buildCsv(solved, options) {
  * @param {string} filename
  * @param {{constantEuros?: boolean}} [options]
  */
-export function exportCsv(solved, filename = "echeancier-pret.csv", options) {
+export function exportCsv(solved, filename = "pret-a-preter-echeancier.csv", options) {
   if (!solved || !solved.schedule.length) return;
 
   const blob = new Blob([buildCsv(solved, options)], { type: "text/csv;charset=utf-8" });
