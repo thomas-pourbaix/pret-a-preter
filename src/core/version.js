@@ -12,4 +12,18 @@
  *
  * Bumped once per round of deployed changes.
  */
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
+
+/**
+ * What produced the file, spelled out.
+ *
+ * A version number alone identifies a build to whoever already knows which tool wrote it.
+ * An exported workbook or a printed deed travels: it is mailed, filed, opened months later
+ * by the other party, and « v0.3.0 » in a footer says nothing to them. Every document this
+ * project produces therefore carries the name of the application beside the version, so
+ * that a figure questioned later leads back here.
+ */
+export const APP_NAME = "Échéancier de prêt entre particuliers";
+
+/** Name and version as one string, the form the exports print. */
+export const GENERATED_BY = `généré par l'application ${APP_NAME} — version ${VERSION}`;

@@ -41,6 +41,16 @@
   --capital:#1F6F78;
   --interest:#6A4CA8;
   --adjust:#9A6B12;
+  /* The three families of schedule columns. Each has a dark tone for its group heading and
+     a wash of the same hue for the figures beneath, so the eye crosses ten columns knowing
+     at all times which question it is reading the answer to. Same triplet in the workbook
+     and in the annex of the deed. */
+  --group-instalment:#4B3A7A;
+  --group-instalment-wash:#F5F2FB;
+  --group-loan:#1F6F78;
+  --group-loan-wash:#EEF5F5;
+  --group-inflation:#8A6A2F;
+  --group-inflation-wash:#F9F4EA;
   --focus:#6A4CA8;
   --r:4px;
   --display:"IBM Plex Serif",Georgia,"Times New Roman",serif;
@@ -282,15 +292,47 @@ thead th{
 thead th:first-child,thead th:nth-child(2){text-align:left}
 tbody td{padding:6px 12px;text-align:right;border-bottom:1px solid var(--grid-minor);white-space:nowrap}
 tbody td:first-child,tbody td:nth-child(2){text-align:left;color:var(--ink-soft)}
-tbody tr:hover td{background:#F7F5FC}
 td.interest{color:var(--interest)}
 td.capital{color:var(--capital)}
+
+/* The three families ---------------------------------------------------
+   A group heading spans its columns and carries the family's dark tone;
+   every cell underneath carries the wash. The families are separated by a
+   hairline rather than a gutter, so nothing widens the table. */
+table.schedule thead tr.groups th{
+  padding:6px 12px;text-align:center;color:#fff;border-bottom:0;
+  font-size:10px;letter-spacing:.12em;
+}
+table.schedule thead tr.groups th.identity{background:var(--ink)}
+table.schedule thead tr.groups th.g-instalment{background:var(--group-instalment)}
+table.schedule thead tr.groups th.g-loan{background:var(--group-loan)}
+table.schedule thead tr.groups th.g-inflation{background:var(--group-inflation)}
+table.schedule thead tr.groups th{top:0}
+table.schedule thead tr.columns th{top:27px}
+table.schedule thead tr.columns th.g-instalment{background:var(--group-instalment-wash)}
+table.schedule thead tr.columns th.g-loan{background:var(--group-loan-wash)}
+table.schedule thead tr.columns th.g-inflation{background:var(--group-inflation-wash)}
+table.schedule .unit{
+  display:block;font-size:9.5px;letter-spacing:.04em;text-transform:none;
+  color:var(--ink-faint);font-weight:400;
+}
+table.schedule td.g-instalment{background:var(--group-instalment-wash)}
+table.schedule td.g-loan{background:var(--group-loan-wash)}
+table.schedule td.g-inflation{background:var(--group-inflation-wash)}
+/* The first column of a family opens it. */
+table.schedule th.first-of-group,table.schedule td.first-of-group{
+  border-left:1px solid var(--grid-major);
+}
+/* Hovering a row still has to read through the washes, so it darkens rather than
+   replaces them. */
+table.schedule tbody tr:hover td{box-shadow:inset 0 0 0 999px rgba(23,38,43,.045)}
+
 tr.year-row td{
   background:var(--paper);font-weight:600;border-bottom:1px solid var(--grid-major);
   border-top:1px solid var(--grid-major);
 }
+table.schedule tr.year-row td{background:var(--paper)}
 tr.year-row td:first-child{letter-spacing:.06em;text-transform:uppercase;font-size:11px}
-tr.adjusted-row td{background:#FDF8EC}
 .flag{color:var(--adjust);font-size:11px}
 
 /* footer ------------------------------------------------------ */
@@ -338,10 +380,10 @@ section{margin-bottom:22px}
           </div>
           <div class="tolerance">
             <label for="principal-tolerance">marge&nbsp;±</label>
-            <input type="text" id="principal-tolerance" inputmode="decimal" value="0">
+            <input type="text" id="principal-tolerance" inputmode="decimal" value="100">
             <span class="unit">€</span>
           </div>
-          <span class="hint">La somme prêtée se négocie par tranches de 100 € : une saisie qui tombe entre deux est ramenée à la plus proche.</span>
+          <span class="hint">Se saisit par tranches de 10 € : une saisie qui tombe entre deux est ramenée à la plus proche. La marge, elle, est indispensable — c'est en déplaçant la somme prêtée, <strong>à l'euro près</strong>, que le calcul fait tomber les mensualités juste. Minimum 10 € ; 100 € y suffit dans 99 % des cas.</span>
         </div>
 
         <div class="field">
@@ -364,10 +406,10 @@ section{margin-bottom:22px}
           </div>
           <div class="tolerance">
             <label for="cost-tolerance">marge&nbsp;±</label>
-            <input type="text" id="cost-tolerance" inputmode="decimal" value="0">
+            <input type="text" id="cost-tolerance" inputmode="decimal" value="100">
             <span class="unit">€</span>
           </div>
-          <span class="hint">Le cumul des intérêts sur toute la durée du prêt. 1 587 € est ce que coûte la valeur par défaut ci-dessus à 3 % l'an ; 0 € est une réponse valable, et donne un prêt sans intérêt.</span>
+          <span class="hint">Le cumul des intérêts sur toute la durée du prêt. 1 587 € est ce que coûte la valeur par défaut ci-dessus à 3 % l'an ; 0 € est une réponse valable, et donne un prêt sans intérêt. Marge minimale 100 €.</span>
         </div>
 
         <div class="field" id="field-rate" hidden>
@@ -378,10 +420,10 @@ section{margin-bottom:22px}
           </div>
           <div class="tolerance">
             <label for="rate-tolerance">marge&nbsp;±</label>
-            <input type="text" id="rate-tolerance" inputmode="decimal" value="0">
+            <input type="text" id="rate-tolerance" inputmode="decimal" value="0,05">
             <span class="unit">%</span>
           </div>
-          <span class="hint">Un taux se négocie par pas de 0,05 point ; une saisie intermédiaire est ramenée au plus proche. Chaque échéance applique ce taux <strong>divisé par 12</strong>, comme le font les offres de prêt françaises.</span>
+          <span class="hint">Un taux se négocie par pas de 0,05 point ; une saisie intermédiaire est ramenée au plus proche, et la marge vaut au minimum ce même pas. Chaque échéance applique ce taux <strong>divisé par 12</strong>, comme le font les offres de prêt françaises.</span>
         </div>
 
         <div class="field" id="field-inflation">
@@ -426,12 +468,12 @@ section{margin-bottom:22px}
         </table>
         <p class="balance-caption" id="balance-caption"></p>
 
-        <!-- Everything below is a failure report. A run that finds what was asked for
-             says nothing here: the balance sheet above already shows it, term by term. -->
+        <!-- Everything below reports what the calculation had to concede. A run that finds
+             what was asked for inside the margins says so in one line and no more: the
+             balance sheet above already shows it, term by term. -->
         <div id="diagnostics" aria-live="polite">
           <div class="note" id="rate-warning" hidden></div>
           <div class="note" id="tolerance-note" hidden></div>
-          <div class="note info" id="round-note" hidden></div>
           <div class="note" id="convergence-warning" hidden>Le solveur n'a pas convergé : le coût demandé est hors de portée pour cette durée. Le taux affiché est une borne, pas une solution.</div>
         </div>
         <div class="note" id="error" role="alert" hidden></div>
@@ -440,8 +482,11 @@ section{margin-bottom:22px}
 
   </section>
 
-  <!-- A reading of the balance sheet above, not a term of the contract: what the lender
-       is left with once the two things that quietly take their share have taken it. -->
+  <!-- Two readings of the balance sheet above, neither of them a term of the contract, and
+       each answering its own question. They used to share a section, which tied the second
+       to the inflation switch: « Je veux que ce soit deux sections indépendantes et voir
+       les effets de la fiscalité même si pas d'inflation. » Tax does not depend on
+       inflation, so it no longer disappears with it. -->
   <section class="panel" id="inflation-effect" hidden>
     <div class="panel-head">
       <h2>Effet de l'inflation</h2>
@@ -452,25 +497,48 @@ section{margin-bottom:22px}
 
       <div class="readings">
         <div class="reading-block">
-          <span class="k">En euros constants <span id="constant-basis"></span></span>
+          <span class="k">Ce que le prêteur encaisse, en euros constants <span id="constant-basis"></span></span>
           <div class="constant-figures">
             <span>coût des intérêts <b id="out-constant-cost">—</b></span>
             <span>total versé <b id="out-constant-total">—</b></span>
-            <span>taux réel, net d'inflation <b id="out-real-rate">—</b></span>
+            <span>taux annuel réel, net de la seule inflation <b id="out-real-rate">—</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Tax: its own section, shown whatever the inflation switch says, because what the
+       state takes of the interest does not depend on what prices do. -->
+  <section class="panel" id="tax-effect">
+    <div class="panel-head">
+      <h2>Effet de la fiscalité</h2>
+      <span class="eyebrow" style="margin:0" id="tax-tag"></span>
+    </div>
+    <div class="panel-body">
+      <p class="reading-lead" id="tax-lead"></p>
+
+      <div class="readings">
+        <div class="reading-block indicative">
+          <span class="k">Pour le prêteur, net de prélèvements — indicatif</span>
+          <div class="constant-figures">
+            <span>intérêts nets de prélèvements <b id="out-net-cost">—</b></span>
+            <span>taux annuel nominal, net de prélèvements <b id="out-net-rate">—</b></span>
           </div>
         </div>
 
-        <div class="reading-block indicative">
-          <span class="k">Pour le prêteur, net d'impôt — indicatif</span>
+        <!-- The two figures that need both readings at once. Hidden with the inflation
+             view, since without it they would repeat the block above. -->
+        <div class="reading-block indicative" id="tax-and-inflation" hidden>
+          <span class="k">Net de prélèvements <em>et</em> d'inflation, en euros constants <span id="net-constant-basis"></span></span>
           <div class="constant-figures">
-            <span>intérêts nets <b id="out-net-cost">—</b></span>
-            <span>en euros constants <b id="out-net-constant-cost">—</b></span>
-            <span>taux réel, net d'impôt et d'inflation <b id="out-net-real-rate">—</b></span>
+            <span>intérêts nets, en euros constants <b id="out-net-constant-cost">—</b></span>
+            <span>taux annuel réel, net des deux <b id="out-net-real-rate">—</b></span>
           </div>
         </div>
       </div>
 
-      <p class="reading-source">Les intérêts encaissés par le prêteur sont un revenu de placement à revenu fixe : ils supportent le prélèvement forfaitaire unique de <strong>30 %</strong> — 12,8 % d'impôt sur le revenu et 17,2 % de prélèvements sociaux — sauf option pour le barème de l'impôt sur le revenu, qui peut être plus favorable aux revenus modestes (<a href="https://www.service-public.fr/particuliers/vosdroits/F2613">service-public.fr, revenus d'épargne et de placement</a>, taux en vigueur en 2026). La ligne ci-dessus applique ce taux tel quel au coût des intérêts : c'est un ordre de grandeur, pas une déclaration.</p>
+      <p class="reading-source">Les intérêts encaissés par le prêteur sont un revenu de placement à revenu fixe : ils supportent le <strong>prélèvement forfaitaire unique</strong> de <strong>30 %</strong>, qui réunit deux prélèvements de nature différente — <strong>12,8 % d'impôt sur le revenu</strong> et <strong>17,2 % de prélèvements sociaux</strong> (CSG, CRDS et prélèvement de solidarité), lesquels ne sont pas un impôt. Sauf option pour le barème de l'impôt sur le revenu, qui peut être plus favorable aux revenus modestes (<a href="https://www.service-public.fr/particuliers/vosdroits/F2613">service-public.fr, revenus d'épargne et de placement</a>, taux en vigueur en 2026). Les lignes ci-dessus appliquent ce taux tel quel au coût des intérêts : c'est un ordre de grandeur, pas une déclaration.</p>
     </div>
   </section>
 
@@ -522,19 +590,11 @@ section{margin-bottom:22px}
       </div>
     </div>
     <div class="scroller" tabindex="0" role="region" aria-label="Tableau de l'échéancier, défilable au clavier">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">N°</th>
-            <th scope="col">Échéance</th>
-            <th scope="col">Mensualité</th>
-            <th scope="col">Intérêts</th>
-            <th scope="col">Capital amorti</th>
-            <th scope="col">Capital restant dû</th>
-            <th scope="col">Intérêts cumulés</th>
-            <th scope="col">Capital remboursé</th>
-          </tr>
-        </thead>
+      <!-- Header and body are both written by src/ui/table.js from the column model of
+           src/core/schedule-columns.js: three families, three grounds, one layout shared
+           with the workbook, the CSV and the annex of the deed. -->
+      <table class="schedule">
+        <thead id="thead"></thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
@@ -545,10 +605,10 @@ section{margin-bottom:22px}
     <ul>
       <li>Mensualité constante, intérêts calculés sur le capital restant dû au taux mensuel <em>i</em>, arrondis au centime à chaque échéance.</li>
       <li>Taux annuel nominal = <em>i</em> × 12 (taux proportionnel, convention des offres de prêt françaises).</li>
-      <li>La mensualité est un nombre entier d'euros, identique de la première à la dernière échéance : c'est le taux qui est choisi pour que ces échéances soldent le capital au centime, solde final 0,00 €. La mensualité ronde s'écarte donc de celle qui découlerait exactement de vos hypothèses, et le taux comme le coût s'en trouvent déplacés — le bilan affiche les deux colonnes, souhaité et contractualisé, et ne masque aucun écart.</li>
-      <li>Quand aucune mensualité ronde ne solde le prêt, même en s'écartant de 24 €, le calcul revient à la convention bancaire — mensualité au centime, dernière échéance ajustée — et le dit à l'écran. Les cumuls sont affichés à l'euro.</li>
-      <li>Un coût nul, ou un taux de 0 %, donne un prêt <strong>sans intérêt</strong> : la mensualité vaut alors le capital divisé par la durée, et rien n'est jamais ajouté pour la rendre ronde.</li>
-      <li>Le taux est affiché par pas de 0,05 point, comme il se négocie ; la valeur exacte retenue pour dérouler l'échéancier est rappelée juste en dessous.</li>
+      <li><strong>Aucune échéance n'est jamais ajustée.</strong> La mensualité est un nombre entier d'euros, rigoureusement identique de la première à la dernière, et les <em>n</em> échéances soldent le capital au centime : solde final 0,00 €. Un virement permanent se met en place une fois pour toutes.</li>
+      <li>Ce qui donne pour y parvenir, c'est <strong>la somme prêtée</strong> — à l'euro près, dans la marge que vous indiquez, au-delà si la marge n'y suffit pas. Le taux, ou le coût, s'en trouve déplacé lui aussi. Le bilan affiche les deux colonnes, souhaité et contractualisé, et ne masque aucun écart.</li>
+      <li>Un coût nul, ou un taux de 0 %, donne un prêt <strong>sans intérêt</strong> : la mensualité vaut alors le capital divisé par la durée, et rien n'est jamais ajouté pour la rendre ronde. Seule la somme prêtée bouge — elle devient un multiple exact du nombre d'échéances.</li>
+      <li>Le taux affiché est <strong>indicatif</strong>, lu par pas de 0,05 point comme il se négocie : ce qui fait foi, c'est l'échéancier. La valeur exacte retenue pour le dérouler est rappelée juste en dessous.</li>
       <li>Le tableur exporté contient les <strong>valeurs calculées</strong> et les hypothèses qui les produisent, sur deux onglets.</li>
       <li>La <strong>reconnaissance de dette</strong> exportée en PDF reprend les termes contractualisés du bilan et annexe l'échéancier complet. Les montants sont imprimés, les informations personnelles sont laissées à remplir à la main. C'est un modèle, pas un conseil juridique.</li>
     </ul>

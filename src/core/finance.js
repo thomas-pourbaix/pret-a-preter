@@ -149,8 +149,9 @@ export function buildSchedule({
     let instalment = payment;
 
     // The final instalment settles whatever is left, and takes the drift with it —
-    // unless the caller has already picked a rate that lands on zero on its own, in
-    // which case every instalment must stay strictly equal (see solveRoundPayment).
+    // unless the caller has already picked an amount and a rate that land on zero on
+    // their own, in which case every instalment must stay strictly equal. That is what
+    // solveLoan does in the mode the application uses, and INV-015 is the reason.
     if (settleWithLastInstalment && (k === periods || capital > balance)) {
       capital = round2(balance);
       instalment = round2(capital + interest);
@@ -222,16 +223,28 @@ export function rateForExactInstalment(principal, periods, payment) {
   // Paying back exactly the principal is the interest-free case.
   if (totalPaid === principal) return 0;
 
-  let hi = 1e-6;
+  // The exact-settling rate sits within a hair of the rate that solves the same loan
+  // continuously, so that is where the bracket starts rather than at a millionth doubled
+  // twenty times over. This search is walked thousands of times when the amount has to be
+  // stretched, and every doubling costs a full pass down the schedule.
+  let hi = Math.max(1e-6, solveRate(principal, totalPaid - principal, periods).rate);
   while (balanceAfterConstantInstalments(principal, periods, payment, hi) < 0 && hi < 1) {
     hi *= 2;
   }
   if (balanceAfterConstantInstalments(principal, periods, payment, hi) < 0) return null;
 
   let lo = 0;
-  for (let k = 0; k < 100; k++) {
+  // Below a millionth of a millionth of a point the closing balance can no longer move:
+  // on the largest loan this tool accepts, such a change is worth less than a thousandth
+  // of a cent. Halving past that point is pure cost, and there are a hundred halvings of
+  // it in the bracket the doubling leaves behind.
+  const RATE_RESOLUTION = 1e-12;
+
+  for (let k = 0; k < 100 && hi - lo > RATE_RESOLUTION; k++) {
     const mid = (lo + hi) / 2;
-    if (balanceAfterConstantInstalments(principal, periods, payment, mid) < 0) lo = mid;
+    const balance = balanceAfterConstantInstalments(principal, periods, payment, mid);
+    if (balance === 0) return mid;
+    if (balance < 0) lo = mid;
     else hi = mid;
   }
 
@@ -244,48 +257,71 @@ export function rateForExactInstalment(principal, periods, payment) {
 }
 
 /**
- * Picks the whole-euro instalment nearest to `targetPayment` that some rate settles
- * exactly, so that every single instalment of the loan is the same round amount.
- *
- * Not every whole-euro instalment admits such a rate, so the search walks outwards one
- * euro at a time. On a tie the lower instalment wins, which is the cheaper of the two
- * for the borrower.
- *
- * @returns {{payment: number, rate: number, offset: number}|null}
- */
-export function solveRoundPayment({ principal, periods, targetPayment, maxOffset = 24 }) {
-  const start = Math.max(1, Math.round(targetPayment));
-
-  for (let offset = 0; offset <= maxOffset; offset++) {
-    const candidates = offset === 0 ? [start] : [start - offset, start + offset];
-    for (const payment of candidates) {
-      if (payment <= 0) continue;
-      const rate = rateForExactInstalment(principal, periods, payment);
-      if (rate !== null) return { payment, rate, offset };
-    }
-  }
-  return null;
-}
-
-/**
- * A loan between individuals is negotiated in round hundreds: one lends 5 100 €, never
+ * A loan between individuals is negotiated in round steps: one lends 5 130 €, never
  * 5 137,42 €. This is a property of the problem, not a setting — what the lender adjusts
  * is how far from the intended amount they are willing to move.
+ *
+ * Ten euros, not a hundred, since the fifth round of feedback (INV-015). The lent amount
+ * is the only quantity that can be moved freely, and it is what every schedule now leans
+ * on to fall exactly: a ten-euro grid offers ten times as many amounts to land on, which
+ * is the difference between « aucune mensualité ronde ne convient » and 9 960 € payable
+ * in 120 instalments of 83 € to the cent.
  */
-export const PRINCIPAL_STEP = 100;
+export const PRINCIPAL_STEP = 1;
 
-/** How far the hint search will stretch the principal before giving up, in euros. */
-const MAX_HINT_PRINCIPAL_OFFSET = 5_000;
+/**
+ * How far the search will stretch the principal before giving up, in euros.
+ *
+ * Two hundred, not five thousand: at one euro of resolution the amounts that settle a loan
+ * exactly are dense — over a grid of realistic loans the widest stretch ever needed was
+ * 72 € — and anything found beyond a couple of hundred euros of the intention is no longer
+ * the loan that was being negotiated. It also bounds the only walk in this module that
+ * costs a bisection per step, which is what keeps the search inside a keystroke.
+ */
+const MAX_HINT_PRINCIPAL_OFFSET = 200;
+
+/**
+ * The same, for the interest-free search, which only tests a division and can therefore
+ * afford to look much further: on a term such as 997 months the amounts that divide into
+ * whole euros are spaced 9 970 € apart, and there is no other lever to pull.
+ */
+const MAX_FREE_PRINCIPAL_OFFSET = 20_000;
+
+/**
+ * Whole-step principals, the intended amount first, then outwards in both directions.
+ *
+ * Used by every search that is allowed to move the amount beyond the margin the lender
+ * gave. Walking outwards once, and stopping at the first hit, is what keeps those searches
+ * linear: re-running a widening search at every tolerance in turn rescans the same amounts
+ * over and over, and with a ten-euro grid that is thousands of bisections for nothing.
+ */
+function* principalsOutwards(target, maxOffset) {
+  const base = Math.round(target / PRINCIPAL_STEP) * PRINCIPAL_STEP;
+
+  // The amount as typed comes first when it sits between two steps: it is what the lender
+  // meant, and it may well work.
+  if (target !== base && target > 0) yield target;
+
+  for (let offset = 0; offset <= maxOffset; offset += PRINCIPAL_STEP) {
+    if (offset === 0) {
+      if (base > 0) yield base;
+      continue;
+    }
+    // Lower first: on a tie it is the cheaper of the two for the borrower.
+    if (base - offset > 0) yield base - offset;
+    yield base + offset;
+  }
+}
 
 /** Half-width of the instalment sweep used to answer "how much would you have to give?". */
 const HINT_RATE_SPAN = 0.05;
 const HINT_COST_SPAN_PER_PERIOD = 60;
 
 /**
- * Whole-hundred principals within tolerance, nearest intent first.
+ * Whole-step principals within tolerance, nearest intent first.
  *
- * With a zero tolerance the lender means the amount they typed, whether or not it is a
- * round hundred, so the granularity does not get to overrule them.
+ * With a zero tolerance the lender means the amount they typed, whether or not it sits on
+ * the grid, so the granularity does not get to overrule them.
  */
 function candidatePrincipals(target, tolerance) {
   if (!(tolerance > 0)) return [target];
@@ -312,8 +348,8 @@ function candidatePrincipals(target, tolerance) {
  * interest — which is precisely what a loan agreed free of interest must never do
  * (INV-014).
  *
- * What can still move is the principal, within the margin the lender allowed: 9 600 € over
- * 120 months is 80 € a month, exactly, and free.
+ * What can still move is the principal, within the margin the lender allowed: 9 960 € over
+ * 120 months is 83 € a month, exactly, and free.
  *
  * @returns {{principal: number, payment: number, rate: number, offset: number}|null}
  */
@@ -328,28 +364,47 @@ export function solveInterestFreeRoundPayment({ principal, principalTolerance = 
 }
 
 /**
- * The nearest whole-hundred principal that a whole-euro instalment repays interest-free.
+ * The nearest principal on the grid that a whole-euro instalment repays interest-free.
  *
- * Its only job is to tell the lender which way to move when their own amount does not
- * divide: « 9 600 € y arriverait » is actionable, « aucune mensualité ronde n'existe » is
- * not.
+ * This is what a free loan leans on when the amount the lender typed does not divide: the
+ * rate cannot give ground on a loan agreed free of interest, so the amount must. 10 000 €
+ * over 120 months is 83,33 €; 9 960 € is 83 € exactly, and still free.
  *
  * @returns {{principal: number, payment: number}|null}
  */
 export function nearestInterestFreePrincipal(
   principal,
   periods,
-  maxOffset = MAX_HINT_PRINCIPAL_OFFSET
+  maxOffset = MAX_FREE_PRINCIPAL_OFFSET
 ) {
-  for (let offset = PRINCIPAL_STEP; offset <= maxOffset; offset += PRINCIPAL_STEP) {
-    for (const candidate of [principal - offset, principal + offset]) {
-      const rounded = Math.round(candidate / PRINCIPAL_STEP) * PRINCIPAL_STEP;
-      if (rounded > 0 && Number.isInteger(rounded / periods)) {
-        return { principal: rounded, payment: rounded / periods };
-      }
+  for (const candidate of principalsOutwards(principal, maxOffset)) {
+    if (candidate !== principal && Number.isInteger(candidate / periods)) {
+      return { principal: candidate, payment: candidate / periods };
     }
   }
   return null;
+}
+
+/**
+ * A free loan that falls exactly, whatever the lender typed.
+ *
+ * Inside the margin first, since that is what was agreed; beyond it only when nothing
+ * inside divides — and something always divides eventually, the amounts that do being
+ * spaced by the lowest common multiple of the grid and the term.
+ *
+ * @returns {{stage: string, principal: number, payment: number, rate: 0}}
+ */
+function exactInterestFreeLoan({ principal, principalTolerance, periods }) {
+  const inside = solveInterestFreeRoundPayment({ principal, principalTolerance, periods });
+  if (inside) return { stage: "marges", ...inside };
+
+  const stretched = nearestInterestFreePrincipal(principal, periods);
+  if (stretched) return { stage: "somme", rate: 0, offset: 0, ...stretched };
+
+  // Unreachable in practice: k × periods divides by construction, for any k. Kept so that
+  // the function has no path that returns a loan with an adjusted final instalment.
+  const payment = Math.max(1, Math.round(principal / periods));
+  return { stage: "repli", principal: payment * periods, payment, rate: 0, offset: 0 };
 }
 
 /** What the caller is aiming at, and how far it may be missed. */
@@ -380,7 +435,7 @@ function instalmentRange(objective, principal, periods, span) {
 
 /**
  * Finds a loan that is round in every way the lender cares about: a principal in whole
- * hundreds, an instalment in whole euros, identical on all `n` dates, settling the debt
+ * steps, an instalment in whole euros, identical on all `n` dates, settling the debt
  * to the cent — while staying inside the tolerances given for the principal and for the
  * rate (or the cost).
  *
@@ -471,24 +526,35 @@ function buildHints({ principal, principalTolerance, periods, objective }) {
   };
 }
 
-/** Keeping the principal tolerance: how much rate, or cost, would have to be conceded. */
+/**
+ * Keeping the principal tolerance: how much rate, or cost, would have to be conceded.
+ *
+ * Each amount is tried against the instalments nearest the one it implies rather than
+ * against a wide sweep of them. The instalment is what drives the distance to the
+ * objective, so the near ones are the only ones that can win — and at one euro of
+ * resolution on the amount, sweeping a hundred instalments across two hundred amounts is
+ * twenty thousand bisections for an answer that was in the first dozen.
+ */
 function minimumObjectiveWidening({ principal, principalTolerance, periods, objective }) {
-  const span =
-    objective.kind === "rate" ? HINT_RATE_SPAN : HINT_COST_SPAN_PER_PERIOD * periods;
-
   let best = null;
 
   for (const candidate of candidatePrincipals(principal, principalTolerance)) {
-    const [low, high] = instalmentRange(objective, candidate, periods, span);
+    const centre = Math.round(idealInstalment(objective, candidate, periods));
 
-    for (let payment = low; payment <= high; payment++) {
-      const rate = rateForExactInstalment(candidate, periods, payment);
-      if (rate === null) continue;
+    for (let offset = 0; offset <= NEAREST_INSTALMENT_SPAN; offset++) {
+      const payments = offset === 0 ? [centre] : [centre - offset, centre + offset];
 
-      const achieved = measure(objective, candidate, payment, periods, rate);
-      const distance = Math.abs(achieved - objective.value);
-      if (best === null || distance < best.needed) {
-        best = { needed: distance, principal: candidate, payment, rate, achieved };
+      for (const payment of payments) {
+        if (payment <= 0) continue;
+
+        const rate = rateForExactInstalment(candidate, periods, payment);
+        if (rate === null) continue;
+
+        const achieved = measure(objective, candidate, payment, periods, rate);
+        const distance = Math.abs(achieved - objective.value);
+        if (best === null || distance < best.needed) {
+          best = { needed: distance, principal: candidate, payment, rate, achieved };
+        }
       }
     }
   }
@@ -496,30 +562,167 @@ function minimumObjectiveWidening({ principal, principalTolerance, periods, obje
   return best;
 }
 
-/** Keeping the rate or cost tolerance: how far the amount would have to move. */
+/**
+ * Keeping the rate or cost tolerance: how far the amount would have to move.
+ *
+ * One walk outwards from the intended amount, stopping at the first combination that lands
+ * inside the objective band — which is by construction the smallest concession there is.
+ */
 function minimumPrincipalWidening({ principal, principalTolerance, periods, objective }) {
-  for (
-    let tolerance = Math.max(principalTolerance, 0) + PRINCIPAL_STEP;
-    tolerance <= MAX_HINT_PRINCIPAL_OFFSET;
-    tolerance += PRINCIPAL_STEP
-  ) {
-    const [best] = searchSolutions({
-      principal,
-      principalTolerance: tolerance,
-      periods,
-      objective
-    });
-    if (best) {
+  const beyond = Math.max(principalTolerance, 0);
+
+  for (const candidate of principalsOutwards(principal, MAX_HINT_PRINCIPAL_OFFSET)) {
+    if (Math.abs(candidate - principal) <= beyond) continue;
+
+    const [low, high] = instalmentRange(objective, candidate, periods);
+
+    for (let payment = low; payment <= high; payment++) {
+      const rate = rateForExactInstalment(candidate, periods, payment);
+      if (rate === null) continue;
+
+      const achieved = measure(objective, candidate, payment, periods, rate);
+      if (Math.abs(achieved - objective.value) > objective.tolerance + 1e-9) continue;
+
       return {
-        needed: Math.abs(best.principalOffset),
-        principal: best.principal,
-        payment: best.payment,
-        rate: best.rate,
-        achieved: best.achieved
+        needed: Math.abs(candidate - principal),
+        principal: candidate,
+        payment,
+        rate,
+        achieved
       };
     }
   }
   return null;
+}
+
+/** How far the last-resort sweep moves the amount, and the instalment, before giving up. */
+const MAX_NEAREST_PRINCIPAL_OFFSET = 200;
+const NEAREST_INSTALMENT_SPAN = 6;
+
+/** The unrounded instalment this objective implies for a given amount. */
+function idealInstalment(objective, principal, periods) {
+  return objective.kind === "rate"
+    ? periodicPayment(principal, objective.value / 12, periods)
+    : (principal + objective.value) / periods;
+}
+
+/**
+ * The last resort of the exact search: give ground on both the amount and the objective at
+ * once, and take the nearest thing that exists.
+ *
+ * Reached only when no amount within reach honours the objective band and no amount within
+ * the lender's own margin settles at all — a 500 € loan spread over 240 months, say, where
+ * whole euros are simply too coarse a grid to express what was asked for. Every margin has
+ * already been blown by then, so what is left to minimise is the distance to the rate, or
+ * to the cost, that was actually wanted; the amount only breaks ties.
+ *
+ * Each amount is tried against the instalments closest to the one it implies, rather than
+ * against a wide sweep: those are the only ones that can come near the objective anyway,
+ * and each candidate costs a bisection.
+ *
+ * @returns {{principal: number, payment: number, rate: number, achieved: number}|null}
+ */
+function nearestExactLoan({ principal, periods, objective }) {
+  let best = null;
+
+  for (const candidate of principalsOutwards(principal, MAX_NEAREST_PRINCIPAL_OFFSET)) {
+    const centre = Math.round(idealInstalment(objective, candidate, periods));
+
+    for (let offset = 0; offset <= NEAREST_INSTALMENT_SPAN; offset++) {
+      const payments = offset === 0 ? [centre] : [centre - offset, centre + offset];
+
+      for (const payment of payments) {
+        if (payment <= 0) continue;
+
+        const rate = rateForExactInstalment(candidate, periods, payment);
+        if (rate === null) continue;
+
+        const achieved = measure(objective, candidate, payment, periods, rate);
+        const distance = Math.abs(achieved - objective.value);
+        const needed = Math.abs(candidate - principal);
+
+        if (best === null || distance < best.distance ||
+            (distance === best.distance && needed < best.needed)) {
+          best = { distance, needed, principal: candidate, payment, rate, achieved };
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+/**
+ * The loan that will actually be signed: `n` identical instalments of a whole number of
+ * euros, settling the debt to the cent, always (INV-015).
+ *
+ * There is no failure branch. An amortising schedule whose last instalment is adjusted by
+ * a few cents is what a bank hands over, and it is precisely what this tool must not
+ * produce: two people setting up a standing order transfer the same figure every month or
+ * they have to remember, ten years later, to send a different one once. So the amount lent
+ * gives ground instead — first inside the margin agreed, then beyond it, and the interface
+ * says by how much.
+ *
+ * @returns {{stage: string, principal: number, payment: number, rate: number,
+ *            tolerances: object}}
+ */
+function exactLoan({ principal, principalTolerance, periods, objective }) {
+  const inside = searchSolutions({ principal, principalTolerance, periods, objective });
+
+  if (inside.length) {
+    return {
+      stage: "marges",
+      tolerances: { found: true, ...inside[0], alternatives: inside.length },
+      ...inside[0]
+    };
+  }
+
+  // Each stage below costs a bisection per amount tried, so they are run one at a time,
+  // in the order of what they concede — never eagerly, which is what made the earlier
+  // hint-building version take the best part of a second on a loan it could not fit.
+
+  // Stretching the amount keeps the rate — or the cost — inside the band that was actually
+  // negotiated, so it is tried before conceding on the objective itself. But only when a
+  // margin on the amount was given at all: a margin of zero is not an omission, it is the
+  // lender saying that this figure is the one, and the objective must give instead.
+  const widenPrincipal =
+    principalTolerance > 0
+      ? minimumPrincipalWidening({ principal, principalTolerance, periods, objective })
+      : null;
+  if (widenPrincipal) {
+    return { stage: "somme", tolerances: { found: false, ...widenPrincipal }, ...widenPrincipal };
+  }
+
+  const widenObjective = minimumObjectiveWidening({
+    principal,
+    principalTolerance,
+    periods,
+    objective
+  });
+  if (widenObjective) {
+    return {
+      stage: "objectif",
+      tolerances: { found: false, ...widenObjective },
+      ...widenObjective
+    };
+  }
+
+  const nearest = nearestExactLoan({ principal, periods, objective });
+  if (nearest) {
+    return { stage: "approché", tolerances: { found: false, ...nearest }, ...nearest };
+  }
+
+  // Nothing within reach carries interest and still falls exactly. A loan that repays
+  // capital alone always does — n instalments of M repay exactly n × M — so the invariant
+  // holds even here, and the interface reports how far this landed from the request.
+  const payment = Math.max(1, Math.round(principal / periods));
+  return {
+    stage: "repli",
+    tolerances: { found: false },
+    principal: payment * periods,
+    payment,
+    rate: 0
+  };
 }
 
 /**
@@ -574,64 +777,35 @@ export function solveLoan({
 
   let payment = round2(exactPayment);
   let settleWithLastInstalment = true;
-  let rounded = null;
+  let stage = null;
   let lentPrincipal = principal;
   let tolerances = null;
 
-  const tolerancesGiven = principalTolerance > 0 || objectiveTolerance > 0;
+  if (roundPayment) {
+    // On a loan agreed free of interest the rate is not a degree of freedom — « sans
+    // intérêt » is a category, not a small number — so only the amount can move (INV-014).
+    const found = interestFree
+      ? exactInterestFreeLoan({ principal, principalTolerance, periods })
+      : exactLoan({
+          principal,
+          principalTolerance,
+          periods,
+          objective: rateIsKnown
+            ? { kind: "rate", value: periodicRate * 12, tolerance: objectiveTolerance }
+            : { kind: "cost", value: totalCost, tolerance: objectiveTolerance }
+        });
 
-  if (roundPayment && interestFree) {
-    // The only degree of freedom left is the principal: see solveInterestFreeRoundPayment.
-    // When it does not divide, the loan falls back on the banking convention below —
-    // instalment to the cent, last one adjusted — and stays free, which is the point.
-    const free = solveInterestFreeRoundPayment({ principal, principalTolerance, periods });
+    ({ stage, tolerances = null } = found);
+    lentPrincipal = found.principal;
+    payment = found.payment;
+    rate = found.rate;
 
-    if (free) {
-      lentPrincipal = free.principal;
-      payment = free.payment;
-      rate = 0;
-      settleWithLastInstalment = false;
-      rounded = { payment, rate: 0, offset: 0 };
-    }
-  } else if (roundPayment && tolerancesGiven) {
-    // With a margin to play with, the principal becomes a third unknown and the rate is
-    // held to the band the lender asked for, instead of landing wherever it fell.
-    const objective = rateIsKnown
-      ? { kind: "rate", value: periodicRate * 12, tolerance: objectiveTolerance }
-      : { kind: "cost", value: totalCost, tolerance: objectiveTolerance };
-
-    tolerances = solveWithinTolerances({
-      principal,
-      principalTolerance,
-      periods,
-      objective
-    });
-
-    if (tolerances.found) {
-      lentPrincipal = tolerances.principal;
-      rate = tolerances.rate;
-      payment = tolerances.payment;
-      settleWithLastInstalment = false;
-      residual = 0;
-      converged = true;
-      rounded = { payment, rate, offset: 0 };
-    }
-  }
-
-  // No tolerances, or none of them helped: fall back to sliding the instalment alone.
-  // Never on an interest-free loan — sliding the instalment is exactly how a zero cost
-  // would turn into eighty euros of interest.
-  if (roundPayment && !rounded && !interestFree) {
-    rounded = solveRoundPayment({ principal, periods, targetPayment: exactPayment });
-    if (rounded) {
-      // The rate is no longer the one that matches the requested cost: it is the one
-      // that makes this round instalment come out even. The cost follows from it.
-      rate = rounded.rate;
-      payment = rounded.payment;
-      settleWithLastInstalment = false;
-      residual = 0;
-      converged = true;
-    }
+    // The schedule now settles on its own, so nothing is left for a final instalment to
+    // absorb, and the solver diagnostics of the rate that was originally asked for no
+    // longer describe the loan being built.
+    settleWithLastInstalment = false;
+    residual = 0;
+    converged = true;
   }
 
   const schedule = inConstantEuros(
@@ -678,15 +852,19 @@ export function solveLoan({
     constantTotalPaid: lastRow
       ? lastRow.constantCumulativeInterest + lastRow.constantCumulativeCapital
       : 0,
-    // Tolerance search: null when no margin was given, otherwise the solution found or
-    // the two hints saying which way to give ground.
+    // Tolerance search: null outside the exact mode, otherwise the solution found or the
+    // two hints saying which way to give ground.
     tolerances,
-    // Round-instalment mode: applied tells the UI whether the constraint could be met,
-    // offset how many euros away from the ideal instalment we had to go to meet it.
+    // How the exact loan was reached, and at what price. `stage` is the first of
+    // « marges » (inside everything that was agreed), « somme » (the amount had to move
+    // beyond its margin), « objectif » (the rate or the cost had to), « approché » (both),
+    // « repli » (nothing carrying interest fell exactly) — and null outside the mode.
     roundPayment: {
       requested: roundPayment,
-      applied: Boolean(rounded),
-      offset: rounded ? rounded.offset : null,
+      applied: stage !== null,
+      stage,
+      withinMargins: stage === "marges",
+      offset: stage === null ? null : Math.abs(payment - round2(exactPayment)),
       idealPayment: round2(exactPayment)
     }
   };

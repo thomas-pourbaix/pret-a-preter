@@ -3,8 +3,9 @@
 > Document d'amorçage pour une nouvelle session Claude Code. Autoportant : il ne suppose
 > aucun accès aux conversations précédentes. Écrit le 16 août 2026, mis à jour le même
 > jour après le **troisième** tour de retours d'interface (§8), après l'ajout de
-> l'**export de la reconnaissance de dette** (§9), puis après le **quatrième** tour de
-> retours (§10) — celui qui a fait tomber le bug du prêt sans intérêt.
+> l'**export de la reconnaissance de dette** (§9), après le **quatrième** tour de
+> retours (§10) — celui qui a fait tomber le bug du prêt sans intérêt — puis après le
+> **cinquième** (§12), celui qui a interdit tout ajustement de fin.
 
 ---
 
@@ -22,8 +23,8 @@ euros ronds**, déroule l'échéancier et l'exporte.
 | Dépôt distant | <https://github.com/thomas-pourbaix/loan-schedule> (public, AGPL-3.0) |
 | Branche de travail | `main` |
 | Pages sert | `main`, à la racine (vérifié : `gh api repos/:owner/loan-schedule/pages`) |
-| Tests | 244, tous verts (`npx vitest run`) |
-| Version | `0.2.0`, dans `src/core/version.js` — incrémentée à chaque tour déployé |
+| Tests | 263, tous verts (`npx vitest run`) |
+| Version | `0.3.0`, dans `src/core/version.js` — incrémentée à chaque tour déployé |
 | Dernier commit | celui qui porte l'export PDF (§9) et le quatrième tour (§10) |
 
 Le chemin local contient des accents et des espaces : **le quoter systématiquement** en bash.
@@ -546,9 +547,9 @@ minutes de Pages.
 
 - **Le point §6.4 reste entier** : l'onglet `Hypothèses` ne distingue toujours pas montant
   souhaité et montant retenu.
-- **La section « Effet de l'inflation » disparaît avec la case « vision inflation »**, donc
-  la ligne de fiscalité aussi, alors qu'elle ne dépend pas de l'inflation. Assumé pour
-  l'instant : c'est une seule et même lecture secondaire. À revoir si Thomas décoche.
+- ~~**La section « Effet de l'inflation » disparaît avec la case « vision inflation »**, donc
+  la ligne de fiscalité aussi.~~ **Tranché au cinquième tour** : deux sections indépendantes,
+  voir §12.3.
 - **Le taux réel net d'impôt** vaut `realRate(nominal × 0,7, π)` : approximation assumée
   (seuls les intérêts sont imposés), et le taux du PFU est figé dans le code — il changera.
 
@@ -561,3 +562,154 @@ Lire dans l'ordre : ce fichier, puis `README.md` (ce que fait l'outil et pourquo
 enfin §5 bis si le travail touche au PDF.
 Lancer `npx vitest run` pour vérifier que le socle est sain avant de toucher à quoi que ce
 soit.
+
+
+---
+
+## 12. Cinquième tour de retours, 16 août 2026
+
+Retours annotés sur captures d'écran (PDF). Le tour est dominé par **un** retour, qui a
+demandé une réécriture du cœur du solveur ; les quatre autres sont de la rédaction et de la
+mise en forme.
+
+### 12.1 Aucun ajustement de fin, jamais — INV-015
+
+> « non. je veux que tu interdises les ajustements de fin. change la somme prétée pour que
+> ça marche. il faut toujours que ça tombe juste. Aucun échéancier avec ajustement de fin
+> n'est autorisé. C'est un invariant. Autorise des incréments de 10 dans la somme prétées si
+> t'aide à trouver plus facilement des solutions. »
+
+Puis, en cours de session :
+
+> « Pour simplifier le solving, on interdit des steps de moins de 10 euros pour
+> l'utilisateur. par contre, en solution, on s'autorise à descendre à l'euro près. »
+
+**Ce qui a changé.** `PRINCIPAL_STEP` passe de 100 à **1**. La saisie, elle, reste sur une
+grille de **10 €** (`STEPPED.principal.step`). Le repli du §4.3 — mensualité au centime,
+dernière échéance ajustée — n'est plus atteignable depuis l'application : `solveLoan` en
+mode `roundPayment` passe désormais par une **cascade de concessions** (`exactLoan`) qui
+rend toujours une solution exacte. `solveRoundPayment`, qui glissait la mensualité en
+laissant le taux tomber où il voulait, est **supprimée** : c'est elle qui avait fabriqué le
+bug du prêt gratuit du §10.1, et la cascade la remplace entièrement.
+
+Les cinq étages, dans l'ordre, avec le nom que porte `solved.roundPayment.stage` :
+`marges` → `somme` → `objectif` → `approché` → `repli`. Voir le tableau du §4.7 bis de la
+spec. Une marge nulle sur la somme saute l'étage `somme` : c'est le prêteur qui dit que ce
+montant-là est le bon.
+
+**Mesures, à ne pas refaire.** Sur 450 prêts réalistes (10 sommes × 9 durées × 5 taux, marge
+de taux ±0,05 pt) : ±10 € de marge sur la somme résout 85,8 % des cas dans les marges,
+±20 € 92,4 %, ±50 € 99,3 %. Plus grand déplacement jamais nécessaire : **72 €**. D'où le
+plancher de 10 € et la valeur par défaut de 100 €.
+
+Le prêt **sans intérêt** est le cas dur : le taux ne peut rien concéder, la somme doit être
+un multiple exact de `n`, et ces sommes sont espacées de `n` euros — jusqu'à `n / 2` euros de
+marge nécessaires. `nearestInterestFreePrincipal` a donc sa propre borne, généreuse (20 000 €),
+puisqu'elle ne fait qu'une division.
+
+**Performance — trois optimisations mesurées, à ne pas défaire.** Passer la grille de 100 €
+à 1 € a multiplié le coût des marches d'élargissement par dix : la suite de tests est passée
+de 10 s à 44 s. Trois changements l'ont ramenée à 11 s, avec un pire cas de **99 ms** par
+résolution (marge ±10 €) :
+
+1. **`rateForExactInstalment` part du taux continu.** `hi` était initialisé à `1e-6` puis
+   doublé une vingtaine de fois ; il part maintenant de `solveRate(...)`, qui est à un
+   cheveu de la réponse et ne coûte rien (pas de boucle sur `n`).
+2. **La dichotomie s'arrête à `1e-12` de largeur de crochet**, au lieu de faire ses cent
+   halvings systématiquement. En dessous, le solde de clôture ne peut plus bouger : sur le
+   plus gros prêt accepté, un tel écart de taux vaut moins d'un millième de centime. Elle
+   sort aussi dès que le solde vaut exactement zéro.
+3. **`minimumObjectiveWidening` et `nearestExactLoan` balaient les mensualités autour de
+   celle qu'implique l'objectif**, à ±6 ou ±8, au lieu d'une large plage. Balayer cent
+   mensualités sur deux cents capitaux, c'était vingt mille dichotomies pour une réponse qui
+   était dans la première douzaine.
+
+**Et les indices ne sont plus construits en avance.** `exactLoan` appelle
+`minimumPrincipalWidening` puis `minimumObjectiveWidening` **un étage à la fois** ; les
+construire tous les deux d'emblée, comme le faisait `solveWithinTolerances`, doublait le
+coût du cas d'échec. `solveWithinTolerances` garde son comportement d'origine : c'est
+l'API publique, testée, et rien dans l'application ne l'appelle plus.
+
+### 12.2 L'échéancier en trois familles colorées
+
+> « fais plutôt un affichage de ce type pour l'échéancier. Matérialise avec des fonds
+> colorés différents les 3 grandes catégories. Propage partout où tu affiches
+> l'échéancier. pas d'effet de l'inflation affiché dans l'échéancier annexé au contrat.
+> c'est un invariant. »
+
+Nouveau module **`src/core/schedule-columns.js`** : un seul modèle de colonnes, groupées en
+trois familles — *la mensualité*, *l'état du prêt*, *l'effet de l'inflation* — lu par le
+tableau de la page, le classeur, le CSV et l'annexe du PDF. Trois tons, identiques partout :
+violet `#4B3A7A` / lavis `#F5F2FB`, pétrole `#1F6F78` / `#EEF5F5`, bronze `#8A6A2F` /
+`#F9F4EA`.
+
+- **Page** : `thead` écrit par `table.js`, deux lignes, `colspan` sur la ligne de familles,
+  `position: sticky` à 0 et 27 px. Les deux colonnes en euros constants **apparaissent
+  enfin à l'écran** — elles n'existaient que dans les exports.
+- **Classeur** : deux lignes d'en-tête figées (`stickyRowsCount: 2`), familles fusionnées
+  via `span`. **Les cellules qu'une fusion recouvre doivent rester présentes dans la ligne**,
+  en `null`, sinon write-excel-file fusionne au-delà de la fin de la ligne.
+- **CSV** : ligne de familles au-dessus de la ligne de colonnes. La couleur ne passe pas,
+  la structure si.
+- **Annexe PDF** : deux familles seulement — **INV-016**, l'annexe est un terme du contrat,
+  pas une lecture. Le bandeau de familles fait 14 pt, l'en-tête de colonnes 26.
+
+Le bandage une ligne sur deux disparaît de l'échéancier : un lavis sous une bande, cela ne
+se lit plus. Il reste sur l'onglet `Hypothèses`, qui n'a pas de familles.
+
+### 12.3 Fiscalité et inflation, deux sections indépendantes
+
+> « intérêts nets = intérêts nets d'IR + CSG ? ou net d'inflation ? ou les deux ? précise.
+> en euros constants de quoi ? la csg n'est pas de l'impôt. mets qqch qui couvre CSG + IR. »
+> « Je veux que ce soit deux section indépendante et voir les effets de la fiscalité même si
+> pas d'inflation. »
+
+Le point laissé ouvert au §10.6 est tranché. **`#tax-effect` est une section à part, jamais
+masquée.** `#inflation-effect` suit la case « vision inflation ». Le seul bloc qui a besoin
+des deux lectures à la fois (`#tax-and-inflation`) suit la case, puisque sans elle il ne
+ferait que répéter le premier.
+
+Vocabulaire, partout : **« prélèvements »**, jamais « impôt » tout court, avec les deux
+moitiés nommées — 12,8 % d'impôt sur le revenu **et** 17,2 % de prélèvements sociaux, qui ne
+sont pas un impôt. Chaque figure dit ce dont elle est nette, et les euros constants disent
+de quelle date.
+
+### 12.4 Le taux affiché est indicatif
+
+> « affiche le avec max 0.05% comme pas, et précise que c'est une valeur indicative (non
+> contractuelle : ce qui fait foi c'est l'échéancier). enlève la mention taux proportionnel
+> blabla. » et « précise que c'est retenu pour le calcul de l'échéancier. »
+
+Dans le PDF, le taux passe partout par `formatSteppedPercent` — 2,90 %, pas 2,8785 % — et
+porte « valeur indicative : l'échéancier annexé fait foi ». La mention « taux
+proportionnel : taux mensuel × 12 » est retirée de l'acte. Le §5 de l'acte le redit en
+prose. Le classeur garde la valeur exacte sur l'onglet `Hypothèses` — c'est là qu'on refait
+le calcul à la main — avec la même mention.
+
+À l'écran, la sous-ligne du bilan dit maintenant « (2,8785 % retenus **pour le calcul de
+l'échéancier**) », qui répond à la question que l'ancienne formulation posait sans y
+répondre.
+
+### 12.5 La provenance sur tout ce qui sort
+
+> « précise "généré par l'application (nom de l'appli)" à côté du nom de version. pareil
+> dans l'excel et tout ce qui est exporté. »
+
+`src/core/version.js` exporte désormais `APP_NAME` (« Échéancier de prêt entre
+particuliers ») et `GENERATED_BY`. Pied de chaque page du PDF, dernière ligne du CSV (après
+une ligne vide, pour qu'un import puisse la couper), ligne « Généré par » de l'onglet
+`Hypothèses`, pied de la page web.
+
+### 12.6 Ce que ce tour laisse ouvert
+
+- **`solveWithinTolerances` n'est plus appelée par l'application.** Elle reste exportée et
+  testée, avec ses deux indices. Soit on l'utilise pour proposer à l'écran « ou bien élargis
+  la marge de taux à ±X », soit on la retire. En l'état c'est de l'API sans appelant.
+- **Le point §6.4 reste entier** : l'onglet `Hypothèses` distingue enfin montant saisi et
+  montant retenu dans sa colonne de notes, mais pas sur deux lignes distinctes.
+- **L'étage `repli`** rend un prêt à taux nul quand rien ne tombe juste en portant intérêt.
+  Il n'a jamais été atteint sur les cas testés. S'il l'était, la note à l'écran le dit, mais
+  la formulation n'a pas été relue en situation.
+- **Le pire cas de résolution est de ~100 ms** avec la marge par défaut, et grimpe avec
+  elle (±50 € → 513 ms sur les cas d'échec). Le debounce de 280 ms le masque à la frappe,
+  mais une marge très large sur un prêt insoluble reste perceptible.

@@ -1,6 +1,6 @@
 {
   "name": "loan-schedule",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Amortizing loan schedule: solves the periodic rate from principal, term and total cost, then unrolls an auditable repayment schedule. Runs entirely in the browser.",

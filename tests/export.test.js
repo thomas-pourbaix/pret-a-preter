@@ -11,6 +11,7 @@ import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import { solveLoan } from "../src/core/finance.js";
+import { APP_NAME, VERSION } from "../src/core/version.js";
 import { buildCsv } from "../src/export/csv.js";
 import {
   SCHEDULE_HEADERS,
@@ -37,13 +38,48 @@ describe("workbook payload", () => {
     expect(sheets.map((sheet) => sheet.sheet)).toEqual(["Hypothèses", "Échéancier"]);
   });
 
-  it("gives the schedule one header row plus one row per instalment", () => {
-    expect(sheets[1].data).toHaveLength(241);
-    expect(sheets[1].data[0].map((cell) => cell.value)).toEqual(SCHEDULE_HEADERS);
+  it("gives the schedule two header rows plus one row per instalment", () => {
+    expect(sheets[1].data).toHaveLength(242);
+    expect(sheets[1].data[1].map((cell) => cell.value)).toEqual(SCHEDULE_HEADERS);
+  });
+
+  /**
+   * The three families, spread over the columns they name. Merging is what makes them
+   * read as one heading rather than as a word sitting above the first column of each.
+   */
+  it("heads the schedule with its three families, each spanning its own columns", () => {
+    const groups = sheets[1].data[0];
+
+    expect(groups.filter(Boolean).map((cell) => [cell.value, cell.span])).toEqual([
+      ["", 2],
+      ["LA MENSUALITÉ", 3],
+      ["L'ÉTAT DU PRÊT", 3],
+      ["L'EFFET DE L'INFLATION", 2]
+    ]);
+    // The cells a merge covers must still be there, or write-excel-file merges past the
+    // end of the row.
+    expect(groups).toHaveLength(SCHEDULE_HEADERS.length);
+  });
+
+  it("grounds each family in its own colour, headings and figures alike", () => {
+    const grounds = (row) => sheets[1].data[row].map((cell) => cell && cell.backgroundColor);
+
+    // Group band, column headings, first instalment: three rows, one palette.
+    expect(grounds(0)).toEqual([
+      "#17262B", null, "#4B3A7A", null, null, "#1F6F78", null, null, "#8A6A2F", null
+    ]);
+    expect(grounds(1)).toEqual([
+      "#17262B", "#17262B", "#4B3A7A", "#4B3A7A", "#4B3A7A",
+      "#1F6F78", "#1F6F78", "#1F6F78", "#8A6A2F", "#8A6A2F"
+    ]);
+    expect(grounds(2)).toEqual([
+      "#FFFFFF", "#FFFFFF", "#F5F2FB", "#F5F2FB", "#F5F2FB",
+      "#EEF5F5", "#EEF5F5", "#EEF5F5", "#F9F4EA", "#F9F4EA"
+    ]);
   });
 
   it("writes numbers as numbers, not as pre-formatted strings", () => {
-    const firstInstalment = sheets[1].data[1];
+    const firstInstalment = sheets[1].data[2];
     expect(firstInstalment[2]).toMatchObject({ value: 1_050, type: Number });
     expect(firstInstalment[3].type).toBe(Number);
     expect(firstInstalment[1].type).toBe(Date);
@@ -73,8 +109,8 @@ describe("workbook payload", () => {
 
   // Scrolling to instalment 180 on a 240-row sheet otherwise loses both the column names
   // and the date of the row being read.
-  it("freezes the header row and the two identifying columns of the schedule", () => {
-    expect(sheets[1].stickyRowsCount).toBe(1);
+  it("freezes both header rows and the two identifying columns of the schedule", () => {
+    expect(sheets[1].stickyRowsCount).toBe(2);
     expect(sheets[1].stickyColumnsCount).toBe(2);
   });
 
@@ -97,10 +133,10 @@ describe("workbook payload", () => {
  */
 describe("workbook layout", () => {
   const [assumptions, schedule] = buildWorkbook(solved);
-  const headerRow = schedule.data[0];
-  const dataRows = schedule.data.slice(1);
+  const headerRow = schedule.data[1];
+  const dataRows = schedule.data.slice(2);
 
-  it("gives the header row the height its wrapped labels need", () => {
+  it("gives the heading row the height its wrapped labels need", () => {
     // One line of the default font is 15 pt; anything at or below that is a clipped wrap.
     expect(headerRow[0].height).toBeGreaterThan(15);
     for (const cell of headerRow) {
@@ -127,9 +163,17 @@ describe("workbook layout", () => {
     expect(value.align).toBe("center");
   });
 
-  it("tints one row in two, header excluded", () => {
-    const bands = dataRows.map((row) => row[0].backgroundColor);
+  /**
+   * Banding and family grounds answer the same need — keeping the eye on its line — so
+   * they do not share a sheet. The assumptions have no families and keep the bands; the
+   * schedule has three, and a band over a wash would only muddy both.
+   */
+  it("bands the assumptions sheet, and grounds the schedule by family instead", () => {
+    const bands = assumptions.data.slice(1).map((row) => row[0].backgroundColor);
     expect(bands.slice(0, 4)).toEqual([undefined, "#F1F5F4", undefined, "#F1F5F4"]);
+
+    const washes = dataRows.slice(0, 4).map((row) => row[2].backgroundColor);
+    expect(washes).toEqual(["#F5F2FB", "#F5F2FB", "#F5F2FB", "#F5F2FB"]);
   });
 
   /**
@@ -224,6 +268,14 @@ describe("inflation view off", () => {
     expect(schedule.columns).toHaveLength(8);
   });
 
+  it("drops the inflation family with them", () => {
+    expect(schedule.data[0].filter(Boolean).map((cell) => cell.value)).toEqual([
+      "",
+      "LA MENSUALITÉ",
+      "L'ÉTAT DU PRÊT"
+    ]);
+  });
+
   it("drops the inflation lines of the assumptions sheet", () => {
     const values = assumptions.data.map((row) => row[0] && row[0].value);
     expect(values).not.toContain("Taux d'inflation annuel");
@@ -235,7 +287,9 @@ describe("inflation view off", () => {
     const lines = buildCsv(solved, { constantEuros: false }).split("\r\n");
     expect(lines[0].split(";")).toHaveLength(8);
     expect(lines[1].split(";")).toHaveLength(8);
-    expect(lines).toHaveLength(241);
+    expect(lines[2].split(";")).toHaveLength(8);
+    // Two headings, 240 instalments, a blank line and the provenance line.
+    expect(lines).toHaveLength(244);
   });
 });
 
@@ -270,12 +324,21 @@ describe("csv", () => {
     expect(csv.charCodeAt(0)).toBe(0xfeff);
   });
 
-  it("has a header row plus one row per instalment", () => {
-    expect(lines).toHaveLength(241);
+  it("has two header rows, one row per instalment, and a line of provenance", () => {
+    expect(lines).toHaveLength(244);
+    expect(lines[1].split(";")).toEqual(SCHEDULE_HEADERS);
+    expect(lines[242]).toBe("");
+    expect(lines[243]).toContain(APP_NAME);
+    expect(lines[243]).toContain(VERSION);
+  });
+
+  /** The families, laid out over the columns they name — as in the workbook, minus colour. */
+  it("carries the three families on a row of their own", () => {
+    expect(lines[0]).toBe("﻿;;La mensualité;;;L'état du prêt;;;L'effet de l'inflation;");
   });
 
   it("separates with semicolons and uses comma decimals", () => {
-    const first = lines[1].split(";");
+    const first = lines[2].split(";");
     expect(first).toHaveLength(SCHEDULE_HEADERS.length);
     expect(first[0]).toBe("1");
     expect(first[1]).toBe("2026-09-05");
@@ -283,7 +346,8 @@ describe("csv", () => {
     expect(first[3]).toBe("399,85");
   });
 
+  // The provenance line carries a version number, which is the one place a dot is meant.
   it("never emits a dot as a decimal separator", () => {
-    expect(csv).not.toMatch(/\d\.\d/);
+    expect(lines.slice(0, 242).join("\r\n")).not.toMatch(/\d\.\d/);
   });
 });

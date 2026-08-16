@@ -287,22 +287,23 @@ problème pour une banque (elle prélève) mais en est un ici.
 Dans ce mode, la mensualité est un **nombre entier d'euros** et vaut la même chose sur les
 `n` échéances, sans exception. Il n'y a plus d'échéance ajustée.
 
-Cela n'est possible que parce qu'on dispose d'un degré de liberté : **le taux est continu,
-alors que le solde final ne prend que des valeurs en centimes**. Pour une mensualité entière
-donnée, les taux qui soldent exactement le prêt forment donc un intervalle — quand cet
-intervalle n'est pas vide, car un pas peut enjamber zéro. L'algorithme :
+Cela n'est possible que parce qu'on dispose de degrés de liberté : **le taux est continu,
+alors que le solde final ne prend que des valeurs en centimes**, et **la somme prêtée peut
+bouger**. Pour une mensualité entière donnée, les taux qui soldent exactement le prêt
+forment donc un intervalle — quand cet intervalle n'est pas vide, car un pas peut enjamber
+zéro, et c'est là que la somme prêtée entre en jeu.
 
-1. calculer la mensualité idéale `(P + C) / n`, l'arrondir à l'euro ;
-2. pour cette mensualité, chercher par dichotomie un taux qui solde à `0,00 €` exactement ;
-3. si aucun n'existe, essayer la mensualité entière suivante, en s'écartant d'un euro à la
-   fois, de part et d'autre (à égalité, la mensualité la plus basse gagne) ;
-4. en pratique un écart de 0 à 3 € suffit toujours sur les cas testés ; la recherche
-   abandonne au-delà de 24 €, et l'on retombe alors sur le §4.3 — mensualité au centime,
-   dernière échéance ajustée. L'interface le dit à l'écran, en toutes lettres.
+> **Ce n'est plus un « en principe », le 16 août 2026 (cinquième tour de retours).**
+> « non. je veux que tu interdises les ajustements de fin. change la somme prétée pour que
+> ça marche. il faut toujours que ça tombe juste. Aucun échéancier avec ajustement de fin
+> n'est autorisé. C'est un invariant. » Le repli du §4.3 n'est donc plus atteignable depuis
+> l'application : voir **INV-015** et §4.7, qui décrivent la cascade de concessions qui
+> garantit une solution exacte dans tous les cas.
 
-**Le coût total n'est plus celui saisi** : il vaut exactement `n × M − P`. Le déplacement
-de la mensualité, le taux retenu et le nouveau coût doivent être affichés en toutes lettres.
-C'est le prix de la contrainte, et il n'a pas à être discret.
+**Le coût total n'est plus celui saisi** : il vaut exactement `n × M − P'`, où `P'` est la
+somme effectivement prêtée. Le déplacement de la somme, celui de la mensualité, le taux
+retenu et le nouveau coût doivent être affichés en toutes lettres. C'est le prix de la
+contrainte, et il n'a pas à être discret.
 
 ### 4.4 Conventions de taux
 
@@ -369,29 +370,59 @@ constants sont une lecture supplémentaire, jamais un remplacement.
 
 Un prêt entre particuliers ne se négocie pas sur des nombres libres. Deux contraintes :
 
-1. **La somme prêtée se négocie par tranches de 100 €.** On prête 5 100 €, pas
-   5 137,42 €. C'est une propriété du problème, donc une constante du code
-   (`PRINCIPAL_STEP`), pas un réglage. Ce que le prêteur règle, c'est **de combien il
-   accepte de s'écarter** du montant visé. Une marge nulle signifie « ce montant-là,
-   exactement », et la granularité ne prend alors pas le pas sur la volonté saisie.
+1. **La somme prêtée se saisit par tranches de 10 €, et le solveur la déplace à l'euro
+   près.** On prête 5 130 €, pas 5 137,42 € — mais rien n'interdit à la recherche de
+   proposer 5 137 € si c'est ce qui fait tomber les échéances juste. La saisie est donc
+   grossière (10 €, pour ne pas s'user les doigts) et la résolution fine (1 €, constante
+   `PRINCIPAL_STEP`). Ce que le prêteur règle, c'est **de combien il accepte de s'écarter**
+   du montant visé, avec un **plancher de 10 €** : la marge n'est plus facultative, c'est
+   elle qui rend l'échéancier exact possible.
 2. **Le taux, ou le coût, se négocie avec une marge** exprimée dans l'unité du champ
-   actif : ±€ sur le coût, ±% sur le taux.
+   actif : ±€ sur le coût (plancher 100 €), ±% sur le taux (plancher 0,05 point).
+
+> **Planchers mesurés, cinquième tour.** Sur une grille de 450 prêts réalistes (10 sommes
+> × 9 durées × 5 taux, marge de taux ±0,05 pt), une marge de ±10 € sur la somme suffit à
+> résoudre **85,8 %** des cas à l'intérieur des marges, ±20 € en résout 92,4 %, ±50 €
+> 99,3 % ; le plus grand déplacement jamais nécessaire est de **72 €**. La valeur par
+> défaut du champ est donc **100 €**, le plancher 10 €.
+>
+> Le prêt **sans intérêt** est le cas à part : le taux ne peut rien concéder, donc la somme
+> doit être un multiple exact du nombre d'échéances. Les sommes qui tombent juste y sont
+> espacées de `n` euros, et il faut jusqu'à `n / 2` euros de marge — 60 € sur dix ans,
+> 120 € sur vingt.
 
 Le mode « mensualité en euros ronds » passe alors de **un** degré de liberté à **trois**
 — capital, mensualité, taux — ce qui le rend bien plus souvent soluble. L'algorithme :
 
-1. capitaux candidats : multiples de 100 € dans la marge, triés par écart croissant ;
+1. capitaux candidats : multiples de 1 € dans la marge, triés par écart croissant ;
 2. la mensualité croissant avec le taux, la bande de taux tolérée borne directement
-   l'intervalle des mensualités entières à essayer — quelques dizaines, pas une force brute ;
+   l'intervalle des mensualités entières à essayer — quelques unités, pas une force brute ;
 3. pour chacune, `rateForExactInstalment` donne le taux qui solde exactement, ou rien ;
 4. on retient les combinaisons dans les marges, classées par écart au capital voulu
    d'abord, à l'objectif ensuite : déplacer le capital est une négociation avec l'autre
    partie, déplacer le taux ne l'est pas.
 
-**En cas d'échec, l'interface donne les deux indices d'élargissement**, calculés
-séparément : de combien il faudrait céder sur le taux (ou le coût) à marge de capital
-constante, et de combien il faudrait céder sur le capital à marge de taux constante, en
-nommant le montant qui conviendrait. Elle dit aussi ce qui est affiché à la place.
+### 4.7 bis — La cascade des concessions (INV-015, cinquième tour)
+
+Il n'y a plus de branche d'échec. Quand rien ne tient dans les marges, on cède, dans cet
+ordre, et l'interface **nomme** ce qui a cédé :
+
+| étage | ce qui cède | condition |
+|---|---|---|
+| `marges` | rien | une combinaison tient dans les deux marges |
+| `somme` | la somme prêtée, au-delà de sa marge | une marge sur la somme avait été donnée ; le taux (ou le coût) reste dans la sienne |
+| `objectif` | le taux, ou le coût | la somme reste dans sa marge |
+| `approché` | les deux | on prend la combinaison exacte la plus proche |
+| `repli` | tout | rien ne tombait juste en portant intérêt : `n × M` avec un taux nul, exact par construction |
+
+Une marge nulle sur la somme n'est pas un oubli : c'est le prêteur qui dit que ce montant-là
+est le bon, et l'étage `somme` est alors sauté. L'étage `approché` peut malgré tout la
+déplacer — l'invariant prime sur la marge, et c'est dit à l'écran.
+
+**Bornes.** La recherche ne déplace la somme que de 200 € au plus (étages `somme` et
+`objectif`), 500 € pour `approché` : à un euro de résolution les solutions sont denses, le
+plus grand déplacement mesuré est de 72 €, et chaque euro exploré coûte une dichotomie.
+`nearestInterestFreePrincipal`, qui ne fait qu'une division, va jusqu'à 20 000 €.
 
 ### 4.5 Hors périmètre (v1)
 
@@ -608,7 +639,7 @@ date**, strictement supérieure au cumul final déflaté en bloc. Le taux réel 
 `(1+i)/(1+π) − 1`.
 
 **INV-010 — Marges respectées** (§4.7). Toute solution rendue par la recherche sous
-contraintes prête un multiple de 100 €, verse une mensualité entière identique sur les `n`
+contraintes prête un multiple de `PRINCIPAL_STEP`, verse une mensualité entière identique sur les `n`
 échéances, solde à `0,00 €` exactement, et respecte les deux marges. Quand aucune solution
 n'existe, **suivre l'indice proposé doit en produire une** : c'est le seul test qui
 prouve qu'un indice est juste, et non simplement affiché.
@@ -631,6 +662,28 @@ d'intérêts**. Sans exception, marges comprises.
 > la somme prêtée, dans la marge autorisée — 10 200 € sur 120 mois font 85 € tout rond, et
 > gratuits. À défaut, la mensualité garde ses centimes (repli du §4.3), et l'interface le
 > dit en nommant la vraie raison, avec la somme qui tomberait juste.
+
+**INV-015 — Aucun ajustement de fin** (ajouté le 16 août 2026, cinquième tour de retours).
+Tout échéancier produit par le mode de l'application (`roundPayment: true`) porte `n`
+mensualités **rigoureusement identiques**, d'un **nombre entier d'euros**, dont la dernière
+solde le prêt à `0,00 €` exactement. Aucune ligne n'est marquée ajustée. Sans exception :
+marge nulle comprise, prêt sans intérêt compris, demande absurde comprise. Ce qui cède pour
+y parvenir est la **somme prêtée**, à l'euro près, et l'interface dit de combien.
+
+> **Ce que cet invariant supprime.** « 10 000 € sur 120 mois sans intérêt » affichait
+> 83,33 € par mois et une dernière échéance de 83,73 €, en expliquant poliment pourquoi.
+> Or deux proches qui s'accordent sur 83 € par mois mettent en place **un virement
+> permanent** et n'y reviennent plus ; une dernière échéance différente leur demande de se
+> souvenir, dix ans plus tard, d'en envoyer une autre — et oblige l'acte à l'écrire. Le
+> repli bancaire du §4.3 n'était pas une solution dégradée acceptable, c'était un défaut.
+> 9 960 € sur 120 mois font 83 € tout rond, et restent gratuits.
+
+**INV-016 — L'annexe du contrat ne parle pas d'inflation** (ajouté le 16 août 2026,
+cinquième tour). L'échéancier annexé à la reconnaissance de dette ne porte **jamais** les
+colonnes en euros constants, quelle que soit l'hypothèse d'inflation saisie et quel que soit
+l'état du commutateur à l'écran. Le pouvoir d'achat est une **lecture** du prêt ; l'annexe
+est un de ses **termes**, paraphé page à page par les deux parties. On ne fait pas parapher
+une hypothèse.
 
 **Cas de référence A** — `P = 200 000 €`, `n = 240`, `C = 52 000 €` :
 

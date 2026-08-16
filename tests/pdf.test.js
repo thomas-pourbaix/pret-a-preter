@@ -14,7 +14,7 @@ import { solveLoan } from "../src/core/finance.js";
 import { A4, createDocument } from "../src/export/pdf/document.js";
 import { encodeWinAnsi, fontWidths, measure, wrapText } from "../src/export/pdf/metrics.js";
 import { buildDeed, renderDeed } from "../src/export/pdf/deed.js";
-import { VERSION } from "../src/core/version.js";
+import { APP_NAME, VERSION } from "../src/core/version.js";
 
 /** The reference loan of the interface: 10 000 € over ten years, cost 1 587 €. */
 const solved = solveLoan({
@@ -210,7 +210,10 @@ describe("the deed", () => {
   it("prints the terms of the contract, and does not ask anyone to copy them", () => {
     expect(somewhere("10 000 €")).toBe(true); // the amount lent
     expect(somewhere("96 €")).toBe(true); // the instalment
-    expect(somewhere("2,8785 %")).toBe(true); // the rate the round instalment implies
+    // The rate reads on the grid it is negotiated on, and says it is indicative: what
+    // binds the parties is the annexed schedule, not a figure with four decimals.
+    expect(somewhere("2,90 %")).toBe(true);
+    expect(somewhere("2,8785 %")).toBe(false);
     expect(somewhere("1 520 €")).toBe(true); // the cost that follows from it
     expect(somewhere("11 520 €")).toBe(true); // the total repaid
     expect(somewhere("120 mensualités")).toBe(true);
@@ -274,9 +277,9 @@ describe("the deed", () => {
   it("numbers every page, and stamps the version on each, once the total is known", () => {
     const numbers = said.filter((text) => text.includes("page "));
     expect(numbers).toHaveLength(doc.pageCount);
-    expect(numbers[0]).toBe(`v${VERSION} · page 1 / ${doc.pageCount}`);
+    expect(numbers[0]).toBe(`${APP_NAME} · v${VERSION} · page 1 / ${doc.pageCount}`);
     expect(numbers[doc.pageCount - 1]).toBe(
-      `v${VERSION} · page ${doc.pageCount} / ${doc.pageCount}`
+      `${APP_NAME} · v${VERSION} · page ${doc.pageCount} / ${doc.pageCount}`
     );
   });
 
@@ -314,8 +317,32 @@ describe("the deed, on the loans that read differently", () => {
     expect(said.some((text) => text && text.includes("revenu imposable"))).toBe(false);
   });
 
-  it("announces the adjusted final instalment when no round one settles the loan", () => {
-    // 500 € over 240 months: the measured case where whole euros are too coarse a grid.
+  /**
+   * INV-016. The annex is a term of the contract; purchasing power is a reading of it.
+   * A borrower initialling every page of a schedule must not be initialling a hypothesis
+   * about inflation — and the loan below is solved with one, so the columns exist and are
+   * deliberately left out.
+   */
+  it("never annexes the constant-euro columns to the contract", () => {
+    const said = renderDeed(solved, { now }).trace.map((item) => flatten(item.text));
+
+    expect(solved.annualInflation).toBeGreaterThan(0);
+    expect(solved.schedule[0].constantBalance).toBeGreaterThan(0);
+
+    expect(said.some((text) => text && text.includes("constants"))).toBe(false);
+    expect(said.some((text) => text && text.includes("inflation"))).toBe(false);
+    // The two families it does carry, named on the annex header of every page.
+    expect(said).toContain("LA MENSUALITÉ");
+    expect(said).toContain("L'ÉTAT DU PRÊT");
+  });
+
+  /**
+   * INV-015, read off the paper. 500 € spread over 240 months is the measured case where
+   * whole euros are too coarse a grid for what was asked; the deed still promises 240
+   * identical instalments, because a deed that ends « sauf la dernière, ajustée à 2,73 € »
+   * is a standing order somebody has to remember to change twenty years later.
+   */
+  it("never announces an adjusted final instalment, however awkward the loan", () => {
     const awkward = solveLoan({
       principal: 500,
       periods: 240,
@@ -323,9 +350,10 @@ describe("the deed, on the loans that read differently", () => {
       roundPayment: true,
       startDate: new Date(2026, 0, 5)
     });
-    expect(awkward.roundPayment.applied).toBe(false);
 
     const said = renderDeed(awkward, { now }).trace.map((item) => flatten(item.text));
-    expect(said.some((text) => text && text.startsWith("sauf la dernière, ajustée à"))).toBe(true);
+    expect(said.some((text) => text && text.includes("ajustée"))).toBe(false);
+    expect(said).toContain("identique de la première à la dernière échéance");
+    expect(new Set(awkward.schedule.map((row) => row.instalment)).size).toBe(1);
   });
 });

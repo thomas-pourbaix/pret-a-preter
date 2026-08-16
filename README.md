@@ -15,14 +15,14 @@ Le fil directeur est la transparence : aucun chiffre affiché n'est une boîte n
 résultat se lit en **bilan à deux colonnes, souhaité et contractualisé**, ligne par ligne
 et écart par écart, parce que la mensualité en euros ronds déplace la somme prêtée, le
 taux et le coût par rapport à ce qui a été saisi. Sous le bilan ne subsiste qu'un rapport
-d'échec — repli bancaire, marges introuvables, non-convergence : quand le calcul ne trouve
-pas ce qui était demandé, il le dit, et quand il le trouve, le bilan l'a déjà montré. Les
-conventions de calcul sont écrites en pied de page.
+de **concession** : ce qui a dû bouger au-delà des marges pour que l'échéancier tombe
+juste. Les conventions de calcul sont écrites en pied de page.
 
-La somme empruntée se saisit **par tranches de 100 €** et le taux **par pas de 0,05
+La somme empruntée se saisit **par tranches de 10 €** et le taux **par pas de 0,05
 point** : c'est ainsi qu'un prêt entre particuliers se négocie. Une saisie intermédiaire
 est ramenée au plus proche plutôt que refusée, et chaque champ concerné porte ses boutons
-d'incrément.
+d'incrément. Le solveur, lui, déplace la somme prêtée **à l'euro près** : c'est ce qui
+permet aux mensualités de tomber juste à tous les coups.
 
 Tout le calcul se fait dans le navigateur. Aucun backend, aucune télémétrie, aucune
 requête vers un tiers : polices et bibliothèque d'export sont servies depuis ce dépôt.
@@ -60,11 +60,10 @@ oracles indépendants (voir plus bas).
   la première à la dernière échéance.
 - À chaque échéance : `intérêts = round2(capital_restant_dû × i)`, puis
   `capital_amorti = round2(mensualité − intérêts)`.
-- Repli, quand aucune mensualité ronde ne solde le prêt : la mensualité est arrondie au
-  centime et **la dernière échéance absorbe la dérive** — elle solde exactement le capital
-  et diffère donc des autres de quelques centimes, et elle est signalée comme ajustée.
-  C'est la convention bancaire française ; elle ne gêne pas une banque, qui prélève le
-  montant qu'elle veut, mais elle gêne un particulier qui rembourse par virement permanent.
+- **Aucune échéance n'est jamais ajustée** (INV-015). La convention bancaire française —
+  mensualité au centime, dernière échéance absorbant la dérive — ne gêne pas une banque,
+  qui prélève le montant qu'elle veut ; elle gêne un particulier qui rembourse par virement
+  permanent. Ce qui cède à sa place, c'est **la somme prêtée**, à l'euro près.
 - Taux annuel **nominal** = `i × 12` (taux proportionnel, convention des offres de prêt
   françaises). C'est le seul taux affiché : le taux **équivalent** (actuariel)
   `(1 + i)^12 − 1` est le TRI du prêteur sous hypothèse de réinvestissement, pas ce que
@@ -106,10 +105,11 @@ La contrepartie est que **le coût total n'est plus celui saisi** : il vaut exac
 mensualité, le taux retenu et le nouveau coût se lisent en face de ce qui a été souhaité,
 écart compris.
 
-Quand aucune mensualité ronde ne solde le prêt, même en s'écartant de 24 €, le calcul
-revient à la convention bancaire — mensualité au centime, dernière échéance ajustée — et
-le dit à l'écran. Le noyau garde les deux chemins : `solveLoan` conserve son paramètre
-`roundPayment`, c'est l'interface qui ne propose plus le choix.
+Quand aucune mensualité ronde ne solde le prêt à la somme demandée, **c'est la somme qui
+bouge**, d'abord dans la marge indiquée, au-delà si la marge n'y suffit pas — et l'interface
+dit de combien. Il n'y a pas de branche d'échec : voir la cascade du §4.7 bis de la spec.
+Le noyau garde les deux chemins : `solveLoan` conserve son paramètre `roundPayment`, c'est
+l'interface qui ne propose plus le choix.
 
 **Le prêt sans intérêt échappe entièrement à cette recherche**, et c'est un invariant
 (INV-014). Glisser la mensualité d'un euro suppose qu'un taux vienne compenser ; sur un
@@ -161,20 +161,26 @@ d'achat en prêtant. Une valeur négative simule une déflation et joue en sens 
 
 ## Marges de négociation
 
-Un prêt entre particuliers ne porte pas sur des nombres libres : la somme se négocie par
-tranches de 100 €, et le taux avec une marge. Deux champs « marge ± » permettent de le
-dire, et le mode euros ronds passe alors de **un** degré de liberté à **trois** — capital,
-mensualité, taux — ce qui le rend bien plus souvent soluble.
+Un prêt entre particuliers ne porte pas sur des nombres libres : la somme se saisit par
+tranches de 10 €, et le taux avec une marge. Deux champs « marge ± » permettent de dire de
+combien chacun peut bouger, et le mode euros ronds passe alors de **un** degré de liberté à
+**trois** — capital, mensualité, taux.
 
-Exemple : 5 100 € à ±200 €, 3 % à ±0,1 %, sur 48 mois →
-**5 100 € prêtés** (le montant exact demandé), **48 × 113 €**, taux **3,0512 %**,
-coût 324 €, solde final `0,00 €`, une seule mensualité distincte.
+**La marge sur la somme n'est pas facultative** : c'est elle qui rend l'échéancier exact
+possible, et son plancher est de 10 €. Mesuré sur 450 prêts réalistes : ±10 € résout 85,8 %
+des cas à l'intérieur des marges, ±50 € en résout 99,3 %, et le plus grand déplacement
+jamais nécessaire est de 72 €. Le champ vaut 100 € par défaut. Sur un prêt **sans intérêt**
+il en faut davantage — les sommes qui tombent juste y sont espacées de `n` euros, soit
+jusqu'à 60 € de marge sur dix ans.
 
-Quand rien ne tient dans les marges, l'interface ne se contente pas de refuser : elle
-chiffre **les deux concessions possibles**, séparément — de combien céder sur le taux à
-marge de capital constante, ou de combien céder sur le capital à marge de taux constante,
-en nommant le montant qui conviendrait. Céder sur l'un ou sur l'autre, ce ne sont pas les
-mêmes discussions avec l'emprunteur.
+Exemple : 5 100 € à ±100 €, 3 % à ±0,05 %, sur 48 mois →
+**5 101 € prêtés** (un euro au-dessus du montant demandé), **48 × 113 €**, taux
+**3,0412 %**, coût 323 €, solde final `0,00 €`, une seule mensualité distincte.
+
+Quand rien ne tient dans les marges, l'interface ne refuse pas — elle ne le peut plus, le
+compte devant tomber juste. Elle **cède, dans un ordre annoncé** : la somme prêtée d'abord
+(le taux reste dans sa marge), le taux ou le coût ensuite, les deux en dernier recours. Et
+elle nomme la concession qu'elle a faite, avec son montant.
 
 ## Exports
 

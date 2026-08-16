@@ -335,7 +335,9 @@ describe("INV-008 — a round instalment never varies", () => {
 
   it.each(loans)("P=%s n=%s C=%s costs exactly n × M − P", (principal, periods, cost) => {
     const solved = solveRound(principal, periods, cost);
-    expect(solved.effectiveCost).toBeCloseTo(solved.payment * periods - principal, 2);
+    // Against the amount actually lent, which is the only degree of freedom the search
+    // has left once the instalment is a whole number of euros repeated n times.
+    expect(solved.effectiveCost).toBeCloseTo(solved.payment * periods - solved.principal, 2);
   });
 
   it("stays close to the instalment the borrower asked for", () => {
@@ -386,7 +388,9 @@ describe("the round-instalment rate is the one that settles the loan", () => {
     expect(rateForExactInstalment(1_000, 24, 2_208)).toBeNull();
   });
 
-  it("gives up cleanly when no round instalment fits, instead of inventing one", () => {
+  it("moves the amount rather than adjust a final instalment, however absurd the ask", () => {
+    // 52 000 € of interest on a 1 000 € loan over two years: nothing sensible fits, and
+    // the tool still has to hand back a schedule of 24 identical instalments (INV-015).
     const solved = solveLoan({
       principal: 1_000,
       periods: 24,
@@ -396,9 +400,11 @@ describe("the round-instalment rate is the one that settles the loan", () => {
     });
 
     expect(solved.roundPayment.requested).toBe(true);
-    expect(solved.roundPayment.applied).toBe(false);
-    // Falling back means the banking convention, which must still be correct.
+    expect(solved.roundPayment.applied).toBe(true);
+    expect(solved.roundPayment.withinMargins).toBe(false);
     expect(solved.schedule).toHaveLength(24);
+    expect(new Set(solved.schedule.map((row) => row.instalment)).size).toBe(1);
+    expect(solved.schedule.some((row) => row.adjusted)).toBe(false);
     expect(solved.schedule[23].balance).toBe(0);
   });
 
@@ -412,6 +418,75 @@ describe("the round-instalment rate is the one that settles the loan", () => {
     expect(plain.roundPayment.applied).toBe(false);
     expect(plain.payment).toBe(1_050);
     expect(plain.schedule[239].instalment).toBe(1_049.96);
+  });
+});
+
+/* ------------------------------------------------- no adjusted instalment (INV-015) */
+
+/**
+ * The invariant added by the fifth round of feedback, and the strictest in the file:
+ * « Aucun échéancier avec ajustement de fin n'est autorisé. »
+ *
+ * Two people who agree on 84 € a month set up a standing order for 84 € and forget about
+ * it. A schedule whose last instalment is 83,73 € asks them to remember, ten years later,
+ * to send a different figure once — and the deed would have to say so. So the amount lent
+ * moves instead, to the euro, until the term falls exactly; how far it had to move is
+ * shown, never hidden.
+ */
+describe("INV-015 — no schedule is ever settled by an adjusted final instalment", () => {
+  const cases = [
+    // Ordinary loans, in both modes.
+    { principal: 10_000, periods: 120, periodicRate: 0.03 / 12, principalTolerance: 100 },
+    { principal: 10_000, periods: 120, totalCost: 1_587, principalTolerance: 100 },
+    { principal: 200_000, periods: 240, totalCost: 52_000, principalTolerance: 100 },
+    { principal: 5_100, periods: 48, periodicRate: 0.03 / 12, principalTolerance: 10 },
+    // Free of interest — the amount is the only lever there is (INV-014).
+    { principal: 10_000, periods: 120, totalCost: 0, principalTolerance: 100 },
+    { principal: 10_000, periods: 120, periodicRate: 0, principalTolerance: 10 },
+    { principal: 7_349, periods: 37, totalCost: 0, principalTolerance: 0 },
+    // No margin at all: the amount still moves, because the invariant outranks the margin.
+    { principal: 10_000, periods: 120, totalCost: 0 },
+    { principal: 12_345, periods: 37, totalCost: 987 },
+    // Asks nothing sensible answers.
+    { principal: 500, periods: 240, totalCost: 60 },
+    { principal: 1_000, periods: 24, totalCost: 52_000 },
+    { principal: 1_000, periods: 1, totalCost: 30 }
+  ];
+
+  it.each(cases)("%j settles with n identical whole-euro instalments", (params) => {
+    const solved = solveLoan({ ...params, startDate: START, roundPayment: true });
+    const last = solved.schedule[solved.schedule.length - 1];
+
+    expect(solved.schedule).toHaveLength(params.periods);
+    expect(Number.isInteger(solved.payment)).toBe(true);
+    expect(new Set(solved.schedule.map((row) => row.instalment))).toEqual(
+      new Set([solved.payment])
+    );
+    expect(solved.schedule.some((row) => row.adjusted)).toBe(false);
+    expect(last.balance).toBe(0);
+    expect(sum(solved.schedule, "capital")).toBe(solved.principal);
+  });
+
+  it("lends a whole number of euros, whatever it had to move by", () => {
+    for (const params of cases) {
+      const solved = solveLoan({ ...params, startDate: START, roundPayment: true });
+      expect(Number.isInteger(solved.principal)).toBe(true);
+      expect(solved.requestedPrincipal).toBe(params.principal);
+    }
+  });
+
+  it("names the concession it made rather than making it silently", () => {
+    const stretched = solveLoan({
+      principal: 10_000,
+      periods: 120,
+      totalCost: 0,
+      startDate: START,
+      roundPayment: true
+    });
+
+    expect(stretched.roundPayment.withinMargins).toBe(false);
+    expect(stretched.roundPayment.stage).toBe("somme");
+    expect(stretched.principal).not.toBe(stretched.requestedPrincipal);
   });
 });
 
@@ -461,26 +536,40 @@ describe("INV-014 — a loan asked for free of interest costs nothing", () => {
   it("moves the amount inside the margin to make the instalment round", () => {
     const solved = free({ principal: 10_000, totalCost: 0, principalTolerance: 500 });
 
-    expect(solved.principal).toBe(10_200);
-    expect(solved.payment).toBe(85);
-    expect(solved.schedule.every((row) => row.instalment === 85)).toBe(true);
+    expect(solved.principal).toBe(9_960);
+    expect(solved.payment).toBe(83);
+    expect(solved.schedule.every((row) => row.instalment === 83)).toBe(true);
   });
 
-  it("falls back on cents rather than on interest when nothing divides", () => {
+  /**
+   * There is no falling back on cents any more (INV-015). 10 000 € over 120 months does
+   * not divide into whole euros, so the amount moves until it does — 9 960 € is 83 € a
+   * month, exactly, and still free — even though no margin was given on it, because a
+   * schedule with an adjusted final instalment is not a thing this tool may produce.
+   */
+  it("stretches the amount rather than adjust the last instalment", () => {
     const solved = free({ principal: 10_000, totalCost: 0 });
 
-    expect(solved.roundPayment.applied).toBe(false);
-    expect(solved.payment).toBe(83.33);
-    expect(solved.schedule[119].instalment).toBe(83.73);
+    expect(solved.roundPayment.applied).toBe(true);
+    expect(solved.roundPayment.stage).toBe("somme");
+    expect(solved.principal).toBe(9_960);
+    expect(solved.payment).toBe(83);
+    expect(solved.schedule.every((row) => row.instalment === 83)).toBe(true);
+    expect(solved.schedule[119].balance).toBe(0);
   });
 
+  /**
+   * The amounts a free loan can settle on are exactly the multiples of the term, since the
+   * instalment is the capital divided by it and must come out in whole euros. They are
+   * therefore spaced `n` euros apart, and the amount never has to move by more than half a
+   * term to reach one — 60 € on a ten-year loan.
+   */
   it("points at the nearest amount that would divide", () => {
-    // 10 200 = 120 × 85, two hundred euros away; 9 600 = 120 × 80 is twice as far.
-    expect(nearestInterestFreePrincipal(10_000, 120)).toEqual({ principal: 10_200, payment: 85 });
-    expect(nearestInterestFreePrincipal(10_000, 7)).toEqual({ principal: 9_800, payment: 1_400 });
-    // A term no whole hundred within reach divides — 999 would need 99 900 € — so the
-    // search says nothing rather than suggest an amount that does not help.
-    expect(nearestInterestFreePrincipal(10_000, 999)).toBe(null);
+    // 9 960 = 120 × 83, forty euros away; 10 080 = 120 × 84 is twice as far.
+    expect(nearestInterestFreePrincipal(10_000, 120)).toEqual({ principal: 9_960, payment: 83 });
+    expect(nearestInterestFreePrincipal(10_000, 7)).toEqual({ principal: 10_003, payment: 1_429 });
+    // Even a term as awkward as 999 months has one, ten euros away.
+    expect(nearestInterestFreePrincipal(10_000, 999)).toEqual({ principal: 9_990, payment: 10 });
   });
 
   it("finds nothing to round when the margin holds the amount still", () => {
@@ -609,11 +698,13 @@ describe("the hints given when nothing fits actually work", () => {
   });
 
   it("widening the principal by the amount suggested yields a solution", () => {
+    // A cost pinned to the euro: no amount within ten euros of 50 000 € reaches it over
+    // fifteen years, but one forty euros out does.
     const spacious = {
-      principal: 12_000,
-      principalTolerance: 100,
-      periods: 48,
-      objective: { kind: "cost", value: 900, tolerance: 5 }
+      principal: 50_000,
+      principalTolerance: 10,
+      periods: 180,
+      objective: { kind: "cost", value: 9_000, tolerance: 1 }
     };
     const { hints } = solveWithinTolerances(spacious);
     expect(hints.widenPrincipal).not.toBeNull();

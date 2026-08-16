@@ -28,10 +28,11 @@ import {
   formatEuroRounded,
   formatLongMonth,
   formatNumber,
-  formatPercent
+  formatSteppedPercent
 } from "../../core/format.js";
 import { spellEuros } from "../../core/words.js";
-import { VERSION } from "../../core/version.js";
+import { APP_NAME, VERSION } from "../../core/version.js";
+import { scheduleGroups } from "../../core/schedule-columns.js";
 import { A4, createDocument } from "./document.js";
 
 /* -------------------------------------------------------------------------- palette */
@@ -89,14 +90,11 @@ function terms(solved) {
   const schedule = solved.schedule;
   const first = schedule[0];
   const last = schedule[schedule.length - 1];
-  const constant = solved.roundPayment.applied;
 
   return {
     principal: solved.principal,
     periods: solved.periods,
     payment: solved.payment,
-    lastPayment: last.instalment,
-    constant,
     rate: solved.annualNominalRate,
     cost: solved.effectiveCost,
     total: solved.principal + solved.effectiveCost,
@@ -466,17 +464,14 @@ function repayment(doc, flow, loan) {
       `${loan.periods} mensualités`,
       `de ${formatLongMonth(loan.firstDate)} à ${formatLongMonth(loan.lastDate)}`
     ],
-    [
-      "Mensualité",
-      euros(loan.payment),
-      loan.constant
-        ? "identique de la première à la dernière échéance"
-        : `sauf la dernière, ajustée à ${formatEuro(loan.lastPayment)}`
-    ],
+    ["Mensualité", euros(loan.payment), "identique de la première à la dernière échéance"],
+    // Read on the grid a rate is negotiated on, and said to be indicative: it is not what
+    // the parties owe each other. What they owe is the schedule annexed below, instalment
+    // by instalment, and the rate is the parameter that produced it.
     [
       "Taux annuel nominal",
-      formatPercent(loan.rate, 4),
-      "taux proportionnel : taux mensuel × 12"
+      formatSteppedPercent(loan.rate),
+      "valeur indicative : l'échéancier annexé fait foi"
     ],
     ["Coût total des intérêts", euros(loan.cost), "sur toute la durée du prêt"],
     ["Total remboursé", euros(loan.total), "capital et intérêts"],
@@ -522,10 +517,12 @@ function interest(doc, flow, loan) {
   prose(
     doc,
     flow,
-    `Le prêt porte intérêt au taux annuel nominal de ${formatPercent(loan.rate, 4)}, ` +
-      "appliqué chaque mois au capital restant dû à raison d'un douzième. Les intérêts " +
-      `sont compris dans les mensualités ci-dessus et n'ont pas à être versés séparément ; ` +
-      `leur montant total s'élève à ${eurosInWords(loan.cost)} sur toute la durée du prêt.`,
+    `Le prêt porte intérêt au taux annuel nominal de ${formatSteppedPercent(loan.rate)}, ` +
+      "appliqué chaque mois au capital restant dû à raison d'un douzième. Ce taux est une " +
+      "valeur indicative : ce qui fait foi entre les parties est l'échéancier annexé, " +
+      "échéance par échéance. Les intérêts sont compris dans les mensualités ci-dessus et " +
+      `n'ont pas à être versés séparément ; leur montant total s'élève à ` +
+      `${eurosInWords(loan.cost)} sur toute la durée du prêt.`,
     { after: 8 }
   );
 
@@ -684,21 +681,35 @@ function notes(doc, flow) {
 /* ---------------------------------------------------------------------- the schedule */
 
 /**
- * Columns of the annexed schedule. The constant-euro pair the spreadsheet can carry is
- * deliberately absent: purchasing power is a reading, and this annex is a contract.
+ * Columns of the annexed schedule, and the two families they fall into.
+ *
+ * The constant-euro family the spreadsheet and the screen carry is deliberately absent, and
+ * that is an invariant (INV-016): purchasing power is a reading of the loan, this annex is
+ * one of its terms. A borrower asked to initial every page of a contract must not be
+ * initialling a hypothesis about inflation.
  */
+const GROUPS = scheduleGroups({ constantEuros: false });
+
+/** Family tones, the same three the page and the workbook use, as PDF colour triples. */
+const GROUP_FILL = {
+  identity: { head: INK, wash: null },
+  instalment: { head: [0.294, 0.227, 0.478], wash: [0.961, 0.949, 0.984] },
+  loan: { head: [0.122, 0.435, 0.471], wash: [0.933, 0.961, 0.961] }
+};
+
 const COLUMNS = [
-  { title: "N°", width: 26, align: "center" },
-  { title: "Échéance", width: 52, align: "left" },
-  { title: "Mensualité", width: 68, align: "right" },
-  { title: "Intérêts", width: 66, align: "right" },
-  { title: "Capital amorti", width: 70, align: "right" },
-  { title: "Capital restant dû", width: 72, align: "right" },
-  { title: "Intérêts cumulés", width: 68, align: "right" },
-  { title: "Capital remboursé", width: 64, align: "right" }
+  { key: "number", title: "N°", group: "identity", width: 26, align: "center" },
+  { key: "date", title: "Échéance", group: "identity", width: 52, align: "left" },
+  { key: "instalment", title: "Mensualité", group: "instalment", width: 68, align: "right" },
+  { key: "interest", title: "Intérêts", group: "instalment", width: 66, align: "right" },
+  { key: "capital", title: "Capital amorti", group: "instalment", width: 70, align: "right" },
+  { key: "balance", title: "Capital restant dû", group: "loan", width: 72, align: "right" },
+  { key: "cumulativeInterest", title: "Intérêts cumulés", group: "loan", width: 68, align: "right" },
+  { key: "cumulativeCapital", title: "Capital remboursé", group: "loan", width: 64, align: "right" }
 ];
 
 const ROW_HEIGHT = 13.2;
+const GROUP_HEIGHT = 14;
 const HEADER_HEIGHT = 26;
 
 function columnBox(index) {
@@ -707,13 +718,46 @@ function columnBox(index) {
   return { x, width: COLUMNS[index].width };
 }
 
+/** Where a family starts and how wide it runs, in points. */
+function groupBox(key) {
+  const first = COLUMNS.findIndex((column) => column.group === key);
+  const width = COLUMNS.filter((column) => column.group === key).reduce(
+    (total, column) => total + column.width,
+    0
+  );
+  return { x: columnBox(first).x, width };
+}
+
+/**
+ * The header of the annex: the families on a band of their own, then the columns beneath
+ * on the family's darker tone. Repeated on every page the schedule runs to.
+ */
 function scheduleHeader(doc, flow) {
-  doc.rect(MARGIN.left, flow.y, CONTENT_WIDTH, HEADER_HEIGHT, { fill: INK });
+  for (const group of GROUPS) {
+    const { x, width } = groupBox(group.key);
+    const fill = GROUP_FILL[group.key];
+
+    doc.rect(x, flow.y, width, GROUP_HEIGHT, { fill: fill.head });
+    if (group.label) {
+      doc.text(group.label.toUpperCase(), {
+        x,
+        y: flow.y + 9.6,
+        width,
+        align: "center",
+        font: "bold",
+        size: 6.4,
+        color: [1, 1, 1],
+        charSpacing: 0.9
+      });
+    }
+
+    doc.rect(x, flow.y + GROUP_HEIGHT, width, HEADER_HEIGHT, { fill: fill.head });
+  }
 
   COLUMNS.forEach((column, index) => {
     const { x, width } = columnBox(index);
     const lines = doc.wrap(column.title, { font: "bold", size: 7.2, width: width - 8 });
-    const top = flow.y + (HEADER_HEIGHT - lines.length * 9) / 2 + 7;
+    const top = flow.y + GROUP_HEIGHT + (HEADER_HEIGHT - lines.length * 9) / 2 + 7;
 
     doc.paragraph(column.title, {
       x: x + 4,
@@ -727,7 +771,17 @@ function scheduleHeader(doc, flow) {
     });
   });
 
-  flow.down(HEADER_HEIGHT);
+  flow.down(GROUP_HEIGHT + HEADER_HEIGHT);
+}
+
+/** The family washes behind one row of figures. */
+function rowGrounds(doc, y) {
+  for (const group of GROUPS) {
+    const wash = GROUP_FILL[group.key].wash;
+    if (!wash) continue;
+    const { x, width } = groupBox(group.key);
+    doc.rect(x, y, width, ROW_HEIGHT, { fill: wash });
+  }
 }
 
 /**
@@ -758,7 +812,7 @@ function annex(doc, flow, loan) {
 
   doc.text(
     `Prêt de ${eurosInWords(loan.principal)} · ${loan.periods} mensualités de ` +
-      `${eurosInWords(loan.payment)} · taux annuel nominal ${formatPercent(loan.rate, 4)} · ` +
+      `${eurosInWords(loan.payment)} · taux annuel nominal ${formatSteppedPercent(loan.rate)} · ` +
       `première échéance le ${formatDate(loan.firstDate)}`,
     { x: MARGIN.left, y: flow.y, size: 9, color: SOFT }
   );
@@ -778,36 +832,30 @@ function annex(doc, flow, loan) {
 
   scheduleHeader(doc, flow);
 
-  loan.schedule.forEach((row, index) => {
+  loan.schedule.forEach((row) => {
     if (flow.y + ROW_HEIGHT > PAGE_BOTTOM) {
       flow.page();
       scheduleHeader(doc, flow);
     }
 
-    if (index % 2) {
-      doc.rect(MARGIN.left, flow.y, CONTENT_WIDTH, ROW_HEIGHT, { fill: TINT });
-    }
+    rowGrounds(doc, flow.y);
 
-    const values = [
-      String(row.number),
-      formatDate(row.date),
-      formatEuro(row.instalment),
-      formatEuro(row.interest),
-      formatEuro(row.capital),
-      formatEuro(row.balance),
-      formatEuro(row.cumulativeInterest),
-      formatEuro(row.cumulativeCapital)
-    ];
+    COLUMNS.forEach((column, index) => {
+      const { x, width } = columnBox(index);
+      const value =
+        column.key === "number"
+          ? String(row.number)
+          : column.key === "date"
+            ? formatDate(row.date)
+            : formatEuro(row[column.key]);
 
-    values.forEach((value, column) => {
-      const { x, width } = columnBox(column);
       doc.text(value, {
         x: x + 4,
         y: flow.y + 9.2,
         width: width - 8,
         size: 7.4,
-        color: column >= 2 ? INK : SOFT,
-        align: COLUMNS[column].align
+        color: column.group === "identity" ? SOFT : INK,
+        align: column.align
       });
     });
 
@@ -872,14 +920,14 @@ function footers(doc, loan) {
 
     doc.line(MARGIN.left, y - 12, RIGHT, y - 12, { color: HAIRLINE, width: 0.5 });
     doc.text(
-      `Reconnaissance de dette — ${eurosInWords(loan.principal)} remboursables en ` +
+      `Reconnaissance de dette — ${eurosInWords(loan.principal)}, ` +
         `${loan.periods} mensualités de ${euros(loan.payment)}`,
       { x: MARGIN.left, y, size: 7.2, color: FAINT }
     );
-    // The version travels with the document: a deed is printed, filed and questioned
-    // months later, and « la mensualité est fausse » is only answerable if one knows
-    // which build wrote the page being pointed at.
-    doc.text(`v${VERSION} · page ${index + 1} / ${count}`, {
+    // What wrote the page, and which build of it. A deed is printed, filed and questioned
+    // months later, by someone who was not the one who exported it: « la mensualité est
+    // fausse » is only answerable if the page names the tool as well as the version.
+    doc.text(`${APP_NAME} · v${VERSION} · page ${index + 1} / ${count}`, {
       x: MARGIN.left,
       y,
       width: CONTENT_WIDTH,
