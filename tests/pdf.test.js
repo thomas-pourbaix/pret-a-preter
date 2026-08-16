@@ -14,7 +14,7 @@ import { solveLoan } from "../src/core/finance.js";
 import { A4, createDocument } from "../src/export/pdf/document.js";
 import { encodeWinAnsi, fontWidths, measure, wrapText } from "../src/export/pdf/metrics.js";
 import { buildDeed, renderDeed } from "../src/export/pdf/deed.js";
-import { APP_NAME, VERSION } from "../src/core/version.js";
+import { APP_NAME, APP_TAGLINE, VERSION } from "../src/core/version.js";
 
 /** The reference loan of the interface: 10 000 € over ten years, cost 1 587 €. */
 const solved = solveLoan({
@@ -277,9 +277,11 @@ describe("the deed", () => {
   it("numbers every page, and stamps the version on each, once the total is known", () => {
     const numbers = said.filter((text) => text.includes("page "));
     expect(numbers).toHaveLength(doc.pageCount);
-    expect(numbers[0]).toBe(`${APP_NAME} · v${VERSION} · page 1 / ${doc.pageCount}`);
+    expect(numbers[0]).toBe(
+      `${APP_NAME} — ${APP_TAGLINE} · v${VERSION} · page 1 / ${doc.pageCount}`
+    );
     expect(numbers[doc.pageCount - 1]).toBe(
-      `${APP_NAME} · v${VERSION} · page ${doc.pageCount} / ${doc.pageCount}`
+      `${APP_NAME} — ${APP_TAGLINE} · v${VERSION} · page ${doc.pageCount} / ${doc.pageCount}`
     );
   });
 

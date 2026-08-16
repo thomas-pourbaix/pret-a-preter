@@ -927,7 +927,7 @@ function footers(doc, loan) {
     // What wrote the page, and which build of it. A deed is printed, filed and questioned
     // months later, by someone who was not the one who exported it: « la mensualité est
     // fausse » is only answerable if the page names the tool as well as the version.
-    doc.text(`${APP_NAME} · v${VERSION} · page ${index + 1} / ${count}`, {
+    doc.text(`${APP_NAME} — ${APP_TAGLINE} · v${VERSION} · page ${index + 1} / ${count}`, {
       x: MARGIN.left,
       y,
       width: CONTENT_WIDTH,
