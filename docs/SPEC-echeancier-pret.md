@@ -204,6 +204,54 @@ C'est le prix de la contrainte, et il n'a pas à être discret.
 - Le périmètre est **hors assurance emprunteur, frais de dossier, garantie et frais annexes** :
   ce n'est pas un TAEG, et l'interface doit le dire.
 
+### 4.6 — Pouvoir d'achat (ajouté le 16 août 2026)
+
+Jusqu'ici l'inflation était implicitement nulle. Elle devient un paramètre, **2 % par
+défaut**, et permet de lire les montants en **euros constants de la date de départ**.
+
+- déflateur de l'échéance de rang `k` : `(1 + π)^(k/12)`, convention **équivalente**
+  (actuarielle). Jamais `π/12` : l'inflation se compose, comme le §4.4 le rappelle déjà
+  pour le taux d'intérêt.
+- L'échéance de rang `k` tombe `k` mois après le départ du prêt : la première porte déjà
+  un mois d'intérêts, donc rang et mois écoulés coïncident.
+- **Chaque versement est déflaté à sa propre date, puis sommé.** Déflater le cumul final
+  reviendrait à traiter vingt ans de versements comme s'ils avaient tous eu lieu le
+  dernier jour, et surestime massivement l'érosion. C'est l'erreur à ne pas commettre.
+- taux réel : `(1 + taux nominal) / (1 + π) − 1`, formule de Fisher. `taux − π` n'en est
+  que l'approximation au premier ordre.
+
+Les montants **nominaux restent l'affichage principal** : c'est ce qui quitte le compte
+chaque mois, et c'est le chiffre dont on a besoin pour paramétrer un virement. Les euros
+constants sont une lecture supplémentaire, jamais un remplacement.
+
+### 4.7 — Marges de négociation (ajouté le 16 août 2026)
+
+Un prêt entre particuliers ne se négocie pas sur des nombres libres. Deux contraintes :
+
+1. **La somme prêtée se négocie par tranches de 100 €.** On prête 5 100 €, pas
+   5 137,42 €. C'est une propriété du problème, donc une constante du code
+   (`PRINCIPAL_STEP`), pas un réglage. Ce que le prêteur règle, c'est **de combien il
+   accepte de s'écarter** du montant visé. Une marge nulle signifie « ce montant-là,
+   exactement », et la granularité ne prend alors pas le pas sur la volonté saisie.
+2. **Le taux, ou le coût, se négocie avec une marge** exprimée dans l'unité du champ
+   actif : ±€ sur le coût, ±% sur le taux.
+
+Le mode « mensualité en euros ronds » passe alors de **un** degré de liberté à **trois**
+— capital, mensualité, taux — ce qui le rend bien plus souvent soluble. L'algorithme :
+
+1. capitaux candidats : multiples de 100 € dans la marge, triés par écart croissant ;
+2. la mensualité croissant avec le taux, la bande de taux tolérée borne directement
+   l'intervalle des mensualités entières à essayer — quelques dizaines, pas une force brute ;
+3. pour chacune, `rateForExactInstalment` donne le taux qui solde exactement, ou rien ;
+4. on retient les combinaisons dans les marges, classées par écart au capital voulu
+   d'abord, à l'objectif ensuite : déplacer le capital est une négociation avec l'autre
+   partie, déplacer le taux ne l'est pas.
+
+**En cas d'échec, l'interface donne les deux indices d'élargissement**, calculés
+séparément : de combien il faudrait céder sur le taux (ou le coût) à marge de capital
+constante, et de combien il faudrait céder sur le capital à marge de taux constante, en
+nommant le montant qui conviendrait. Elle dit aussi ce qui est affiché à la place.
+
 ### 4.5 Hors périmètre (v1)
 
 Assurance emprunteur, remboursements anticipés, différé d'amortissement, taux variable,
@@ -278,6 +326,19 @@ mensualité est un entier d'euros ; les `n` échéances portent **toutes** ce m�
 aucune n'est marquée ajustée ; le capital restant dû après la dernière vaut exactement
 `0,00 €` ; et le coût total vaut exactement `n × M − P`. L'écart entre la mensualité idéale
 et la mensualité retenue reste `≤ 3 €` sur les cas de référence.
+
+**INV-009 — Euros constants** (§4.6). À `π = 0`, les montants en euros constants égalent
+exactement les nominaux. Pour `π > 0`, chaque montant déflaté est inférieur à son nominal
+et le rapport décroît strictement avec le rang de l'échéance ; pour `π < 0`, l'inégalité
+s'inverse. Le coût en euros constants est la somme des intérêts déflatés **à leur propre
+date**, strictement supérieure au cumul final déflaté en bloc. Le taux réel vaut
+`(1+i)/(1+π) − 1`.
+
+**INV-010 — Marges respectées** (§4.7). Toute solution rendue par la recherche sous
+contraintes prête un multiple de 100 €, verse une mensualité entière identique sur les `n`
+échéances, solde à `0,00 €` exactement, et respecte les deux marges. Quand aucune solution
+n'existe, **suivre l'indice proposé doit en produire une** : c'est le seul test qui
+prouve qu'un indice est juste, et non simplement affiché.
 
 **Cas de référence A** — `P = 200 000 €`, `n = 240`, `C = 52 000 €` :
 

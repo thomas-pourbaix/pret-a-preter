@@ -4,7 +4,7 @@
  * rather than as text.
  */
 
-import { toIsoDate } from "../core/finance.js";
+import { round2, toIsoDate } from "../core/finance.js";
 import { SCHEDULE_HEADERS } from "./xlsx.js";
 
 /** French Excel reads `1234,56`, never `1234.56`. */
@@ -29,7 +29,9 @@ export function buildCsv(solved) {
         decimal(row.capital),
         decimal(row.balance),
         decimal(row.cumulativeInterest),
-        decimal(row.cumulativeCapital)
+        decimal(row.cumulativeCapital),
+        decimal(round2(row.constantBalance)),
+        decimal(round2(row.constantCumulativeInterest))
       ].join(";")
     );
   });

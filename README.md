@@ -88,6 +88,48 @@ affichés en toutes lettres sous le bloc de résolution.
 Décocher la case rend la convention bancaire : mensualité au centime, dernière échéance
 ajustée.
 
+## Pouvoir d'achat
+
+L'inflation est un paramètre, **2 % par défaut**. Les montants nominaux restent
+l'affichage principal — c'est ce qui quitte le compte chaque mois — et une lecture
+supplémentaire les restitue **en euros constants de la date de départ**.
+
+Le point à ne pas rater : chaque versement est déflaté **à sa propre date**, puis sommé.
+Déflater le cumul final en bloc reviendrait à traiter vingt ans de versements comme s'ils
+avaient tous eu lieu le dernier jour. Le déflateur est équivalent (actuariel),
+`(1 + π)^(k/12)`, jamais `π/12`.
+
+Le taux réel suit Fisher, `(1 + i) / (1 + π) − 1`, et non la soustraction `i − π` qui n'en
+est que l'approximation.
+
+Sur 200 000 € empruntés sur 240 mois à 52 000 € de coût, en mensualité ronde :
+
+| | Nominal | En euros constants (2 % d'inflation) |
+|---|---|---|
+| Coût des intérêts | 52 240,00 € | **45 696,56 €** |
+| Total versé | 252 240,00 € | **208 107,91 €** |
+| Taux annuel | 2,4094 % | **0,4014 %** de taux réel |
+
+À 5 % d'inflation le taux réel devient négatif (−2,4672 %) : le prêteur perd du pouvoir
+d'achat en prêtant. Une valeur négative simule une déflation et joue en sens inverse.
+
+## Marges de négociation
+
+Un prêt entre particuliers ne porte pas sur des nombres libres : la somme se négocie par
+tranches de 100 €, et le taux avec une marge. Deux champs « marge ± » permettent de le
+dire, et le mode euros ronds passe alors de **un** degré de liberté à **trois** — capital,
+mensualité, taux — ce qui le rend bien plus souvent soluble.
+
+Exemple : 5 100 € à ±200 €, 3 % à ±0,1 %, sur 48 mois →
+**5 100 € prêtés** (le montant exact demandé), **48 × 113 €**, taux **3,0512 %**,
+coût 324 €, solde final `0,00 €`, une seule mensualité distincte.
+
+Quand rien ne tient dans les marges, l'interface ne se contente pas de refuser : elle
+chiffre **les deux concessions possibles**, séparément — de combien céder sur le taux à
+marge de capital constante, ou de combien céder sur le capital à marge de taux constante,
+en nommant le montant qui conviendrait. Céder sur l'un ou sur l'autre, ce ne sont pas les
+mêmes discussions avec l'emprunteur.
+
 ## Tests
 
 Le moteur (`src/core/`) est pur : ni DOM, ni formatage, ni I/O. Les invariants sont donc
@@ -98,10 +140,10 @@ npm install
 npm test
 ```
 
-Les invariants couverts (INV-001 à INV-007) sont décrits dans
+Les invariants couverts (INV-001 à INV-010) sont décrits dans
 [docs/SPEC-echeancier-pret.md](docs/SPEC-echeancier-pret.md) §6 : remboursement intégral
 du capital, conservation, nombre de lignes, fidélité à l'hypothèse de coût, aller-retour
-entre les deux modes, monotonie des parts, et cas dégénéré `n = 1`.
+entre les deux modes, monotonie des parts, cas dégénéré `n = 1`, euros constants et marges de négociation respectées.
 
 Le taux résolu est en outre **vérifié en croisé** contre deux implémentations tierces et
 indépendantes de la fonction `RATE` des tableurs. Elles sont en `devDependencies`

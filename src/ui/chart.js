@@ -207,7 +207,7 @@ export function renderInstalmentChart({ svg, probe, schedule }) {
  * @param {Array<object>} params.schedule rows from buildSchedule()
  * @param {number} params.principal borrowed amount, the starting level of the staircase
  */
-export function renderBalanceChart({ svg, probe, schedule, principal }) {
+export function renderBalanceChart({ svg, probe, schedule, principal, annualInflation = 0 }) {
   svg.replaceChildren();
   if (!schedule.length) {
     probe.textContent = PROBE_IDLE;
@@ -220,7 +220,17 @@ export function renderBalanceChart({ svg, probe, schedule, principal }) {
   const baseline = HEIGHT - PADDING.bottom;
 
   const lastRow = schedule[schedule.length - 1];
-  const maxValue = Math.max(principal, lastRow.cumulativeInterest) || 1;
+  const showConstant = Math.abs(annualInflation) > 1e-9;
+
+  // Deflation pushes the constant-euro curves *above* the nominal ones, so the scale has
+  // to consider them too rather than assume they always sit underneath.
+  const maxValue =
+    Math.max(
+      principal,
+      lastRow.cumulativeInterest,
+      ...(showConstant ? [lastRow.constantCumulativeInterest] : []),
+      ...(showConstant ? schedule.map((row) => row.constantBalance) : [])
+    ) || 1;
   const slot = plotWidth / schedule.length;
 
   const yAt = (value) => baseline - (value / maxValue) * plotHeight;
@@ -244,18 +254,26 @@ export function renderBalanceChart({ svg, probe, schedule, principal }) {
     return parts.join("");
   };
 
-  const line = (d, colour) =>
+  const line = (d, colour, dashed) =>
     add("path", {
       d,
       fill: "none",
       stroke: colour,
-      "stroke-width": 2,
+      "stroke-width": dashed ? 1.5 : 2,
       "stroke-linejoin": "miter",
-      "vector-effect": "non-scaling-stroke"
+      "vector-effect": "non-scaling-stroke",
+      ...(dashed ? { "stroke-dasharray": "5 4", opacity: 0.75 } : {})
     });
 
   line(staircase(principal, (row) => row.balance), COLOUR_CAPITAL);
   line(staircase(0, (row) => row.cumulativeInterest), COLOUR_INTEREST);
+
+  // Same two quantities restated in euros of the start date: dashed, thinner and slightly
+  // faded, so they read as a commentary on the solid pair rather than as rivals to it.
+  if (showConstant) {
+    line(staircase(principal, (row) => row.constantBalance), COLOUR_CAPITAL, true);
+    line(staircase(0, (row) => row.constantCumulativeInterest), COLOUR_INTEREST, true);
+  }
 
   drawDateAxis(add, schedule);
 
@@ -286,7 +304,11 @@ export function renderBalanceChart({ svg, probe, schedule, principal }) {
         `Échéance ${row.number} (${formatMonth(row.date)}) · ` +
         `reste dû ${formatEuro(row.balance)} · ` +
         `intérêts cumulés ${formatEuro(row.cumulativeInterest)} · ` +
-        `capital remboursé ${formatEuro(row.cumulativeCapital)}`;
+        `capital remboursé ${formatEuro(row.cumulativeCapital)}` +
+        (showConstant
+          ? ` — en euros constants : reste dû ${formatEuro(row.constantBalance)}, ` +
+            `intérêts ${formatEuro(row.constantCumulativeInterest)}`
+          : "");
     }
   });
 }

@@ -268,6 +268,213 @@ export function solveRoundPayment({ principal, periods, targetPayment, maxOffset
 }
 
 /**
+ * A loan between individuals is negotiated in round hundreds: one lends 5 100 €, never
+ * 5 137,42 €. This is a property of the problem, not a setting — what the lender adjusts
+ * is how far from the intended amount they are willing to move.
+ */
+export const PRINCIPAL_STEP = 100;
+
+/** How far the hint search will stretch the principal before giving up, in euros. */
+const MAX_HINT_PRINCIPAL_OFFSET = 5_000;
+
+/** Half-width of the instalment sweep used to answer "how much would you have to give?". */
+const HINT_RATE_SPAN = 0.05;
+const HINT_COST_SPAN_PER_PERIOD = 60;
+
+/**
+ * Whole-hundred principals within tolerance, nearest intent first.
+ *
+ * With a zero tolerance the lender means the amount they typed, whether or not it is a
+ * round hundred, so the granularity does not get to overrule them.
+ */
+function candidatePrincipals(target, tolerance) {
+  if (!(tolerance > 0)) return [target];
+
+  const low = Math.ceil((target - tolerance) / PRINCIPAL_STEP) * PRINCIPAL_STEP;
+  const high = Math.floor((target + tolerance) / PRINCIPAL_STEP) * PRINCIPAL_STEP;
+
+  const candidates = [];
+  for (let value = low; value <= high; value += PRINCIPAL_STEP) {
+    if (value > 0) candidates.push(value);
+  }
+  if (!candidates.length) return [target];
+
+  return candidates.sort(
+    (a, b) => Math.abs(a - target) - Math.abs(b - target) || a - b
+  );
+}
+
+/** What the caller is aiming at, and how far it may be missed. */
+function measure(objective, principal, payment, periods, rate) {
+  return objective.kind === "rate" ? rate * 12 : payment * periods - principal;
+}
+
+/**
+ * The whole-euro instalments worth trying for this principal: those whose settling rate,
+ * or resulting cost, could land inside the band. The instalment grows with the rate, so
+ * the band pins the range down to a handful of integers.
+ */
+function instalmentRange(objective, principal, periods, span) {
+  const { kind, value, tolerance } = objective;
+  const width = span === undefined ? tolerance : span;
+
+  if (kind === "rate") {
+    const low = periodicPayment(principal, Math.max(0, value - width) / 12, periods);
+    const high = periodicPayment(principal, (value + width) / 12, periods);
+    return [Math.max(1, Math.floor(low)), Math.ceil(high)];
+  }
+
+  return [
+    Math.max(1, Math.floor((principal + value - width) / periods)),
+    Math.ceil((principal + value + width) / periods)
+  ];
+}
+
+/**
+ * Finds a loan that is round in every way the lender cares about: a principal in whole
+ * hundreds, an instalment in whole euros, identical on all `n` dates, settling the debt
+ * to the cent — while staying inside the tolerances given for the principal and for the
+ * rate (or the cost).
+ *
+ * Three degrees of freedom instead of one. Where solveRoundPayment could only slide the
+ * instalment and let the rate land wherever it fell, here the principal moves too and
+ * the rate is held to account, which is both more useful and far more often solvable.
+ *
+ * @param {object} params
+ * @param {number} params.principal intended amount
+ * @param {number} params.principalTolerance how far the amount may move, in euros
+ * @param {number} params.periods number of instalments
+ * @param {{kind: "rate"|"cost", value: number, tolerance: number}} params.objective
+ *        `rate` values are annual nominal rates (0.03 for 3 %), `cost` values are euros
+ * @returns {object} either a solution, or the two ways of widening that would yield one
+ */
+export function solveWithinTolerances({ principal, principalTolerance, periods, objective }) {
+  const solutions = searchSolutions({ principal, principalTolerance, periods, objective });
+
+  if (solutions.length) {
+    return { found: true, ...solutions[0], alternatives: solutions.length };
+  }
+
+  return { found: false, hints: buildHints({ principal, principalTolerance, periods, objective }) };
+}
+
+/**
+ * The search itself, without the hint machinery. Kept separate because the hints widen
+ * the tolerances and search again: were they to call the public function, each miss
+ * would build its own hints, which would search again, and the whole thing would fold
+ * back on itself exponentially.
+ *
+ * @returns {Array<object>} admissible combinations, best first
+ */
+function searchSolutions({ principal, principalTolerance, periods, objective }) {
+  const principals = candidatePrincipals(principal, principalTolerance);
+  const solutions = [];
+
+  for (const candidate of principals) {
+    const [low, high] = instalmentRange(objective, candidate, periods);
+
+    for (let payment = low; payment <= high; payment++) {
+      const rate = rateForExactInstalment(candidate, periods, payment);
+      if (rate === null) continue;
+
+      const achieved = measure(objective, candidate, payment, periods, rate);
+      if (Math.abs(achieved - objective.value) > objective.tolerance + 1e-9) continue;
+
+      solutions.push({
+        principal: candidate,
+        payment,
+        rate,
+        achieved,
+        cost: payment * periods - candidate,
+        principalOffset: candidate - principal,
+        objectiveOffset: achieved - objective.value
+      });
+    }
+  }
+
+  // Nearest intended amount first, then nearest intended rate or cost: moving the
+  // principal is a negotiation with the other party, moving the rate is not.
+  return solutions.sort(
+    (a, b) =>
+      Math.abs(a.principalOffset) - Math.abs(b.principalOffset) ||
+      Math.abs(a.objectiveOffset) - Math.abs(b.objectiveOffset)
+  );
+}
+
+/**
+ * When nothing fits, saying so is not enough — the lender is mid-negotiation and needs to
+ * know which way to give. Both directions are costed separately, because conceding on the
+ * amount and conceding on the rate are different conversations.
+ */
+function buildHints({ principal, principalTolerance, periods, objective }) {
+  return {
+    widenObjective: minimumObjectiveWidening({
+      principal,
+      principalTolerance,
+      periods,
+      objective
+    }),
+    widenPrincipal: minimumPrincipalWidening({
+      principal,
+      principalTolerance,
+      periods,
+      objective
+    })
+  };
+}
+
+/** Keeping the principal tolerance: how much rate, or cost, would have to be conceded. */
+function minimumObjectiveWidening({ principal, principalTolerance, periods, objective }) {
+  const span =
+    objective.kind === "rate" ? HINT_RATE_SPAN : HINT_COST_SPAN_PER_PERIOD * periods;
+
+  let best = null;
+
+  for (const candidate of candidatePrincipals(principal, principalTolerance)) {
+    const [low, high] = instalmentRange(objective, candidate, periods, span);
+
+    for (let payment = low; payment <= high; payment++) {
+      const rate = rateForExactInstalment(candidate, periods, payment);
+      if (rate === null) continue;
+
+      const achieved = measure(objective, candidate, payment, periods, rate);
+      const distance = Math.abs(achieved - objective.value);
+      if (best === null || distance < best.needed) {
+        best = { needed: distance, principal: candidate, payment, rate, achieved };
+      }
+    }
+  }
+
+  return best;
+}
+
+/** Keeping the rate or cost tolerance: how far the amount would have to move. */
+function minimumPrincipalWidening({ principal, principalTolerance, periods, objective }) {
+  for (
+    let tolerance = Math.max(principalTolerance, 0) + PRINCIPAL_STEP;
+    tolerance <= MAX_HINT_PRINCIPAL_OFFSET;
+    tolerance += PRINCIPAL_STEP
+  ) {
+    const [best] = searchSolutions({
+      principal,
+      principalTolerance: tolerance,
+      periods,
+      objective
+    });
+    if (best) {
+      return {
+        needed: Math.abs(best.principalOffset),
+        principal: best.principal,
+        payment: best.payment,
+        rate: best.rate,
+        achieved: best.achieved
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Solves the loan from whichever quantity the user knows, and unrolls the schedule.
  * Single entry point so that the UI and the tests exercise the same path.
  *
@@ -285,7 +492,10 @@ export function solveLoan({
   startDate,
   totalCost,
   periodicRate,
-  roundPayment = false
+  roundPayment = false,
+  annualInflation = 0,
+  principalTolerance = 0,
+  objectiveTolerance = 0
 }) {
   const rateIsKnown = periodicRate !== undefined;
 
@@ -310,8 +520,38 @@ export function solveLoan({
   let payment = round2(exactPayment);
   let settleWithLastInstalment = true;
   let rounded = null;
+  let lentPrincipal = principal;
+  let tolerances = null;
 
-  if (roundPayment) {
+  const tolerancesGiven = principalTolerance > 0 || objectiveTolerance > 0;
+
+  if (roundPayment && tolerancesGiven) {
+    // With a margin to play with, the principal becomes a third unknown and the rate is
+    // held to the band the lender asked for, instead of landing wherever it fell.
+    const objective = rateIsKnown
+      ? { kind: "rate", value: periodicRate * 12, tolerance: objectiveTolerance }
+      : { kind: "cost", value: totalCost, tolerance: objectiveTolerance };
+
+    tolerances = solveWithinTolerances({
+      principal,
+      principalTolerance,
+      periods,
+      objective
+    });
+
+    if (tolerances.found) {
+      lentPrincipal = tolerances.principal;
+      rate = tolerances.rate;
+      payment = tolerances.payment;
+      settleWithLastInstalment = false;
+      residual = 0;
+      converged = true;
+      rounded = { payment, rate, offset: 0 };
+    }
+  }
+
+  // No tolerances, or none of them helped: fall back to sliding the instalment alone.
+  if (roundPayment && !rounded) {
     rounded = solveRoundPayment({ principal, periods, targetPayment: exactPayment });
     if (rounded) {
       // The rate is no longer the one that matches the requested cost: it is the one
@@ -324,20 +564,25 @@ export function solveLoan({
     }
   }
 
-  const schedule = buildSchedule({
-    principal,
-    rate,
-    periods,
-    payment,
-    startDate,
-    settleWithLastInstalment
-  });
-  const effectiveCost = schedule.length
-    ? schedule[schedule.length - 1].cumulativeInterest
-    : 0;
+  const schedule = inConstantEuros(
+    buildSchedule({
+      principal: lentPrincipal,
+      rate,
+      periods,
+      payment,
+      startDate,
+      settleWithLastInstalment
+    }),
+    annualInflation
+  );
+  const lastRow = schedule.length ? schedule[schedule.length - 1] : null;
+  const effectiveCost = lastRow ? lastRow.cumulativeInterest : 0;
 
   return {
-    principal,
+    // The amount actually lent, which the tolerance search may have moved off the
+    // amount asked for; `requestedPrincipal` keeps the intention for comparison.
+    principal: lentPrincipal,
+    requestedPrincipal: principal,
     periods,
     rate,
     annualNominalRate: annualNominalRate(rate),
@@ -352,6 +597,17 @@ export function solveLoan({
     residual,
     converged,
     rateIsKnown,
+    // Purchasing power. Nominal figures stay the headline — they are what leaves the
+    // account — and these restate them in euros of the day the loan starts.
+    annualInflation,
+    realAnnualRate: realRate(annualNominalRate(rate), annualInflation),
+    constantCost: lastRow ? lastRow.constantCumulativeInterest : 0,
+    constantTotalPaid: lastRow
+      ? lastRow.constantCumulativeInterest + lastRow.constantCumulativeCapital
+      : 0,
+    // Tolerance search: null when no margin was given, otherwise the solution found or
+    // the two hints saying which way to give ground.
+    tolerances,
     // Round-instalment mode: applied tells the UI whether the constraint could be met,
     // offset how many euros away from the ideal instalment we had to go to meet it.
     roundPayment: {
@@ -361,6 +617,72 @@ export function solveLoan({
       idealPayment: round2(exactPayment)
     }
   };
+}
+
+/**
+ * Purchasing-power deflator for the instalment of rank `k`, in euros of the day the loan
+ * starts. Instalment 1 falls one month after the loan begins — it already carries a
+ * month of interest — so rank and elapsed months coincide.
+ *
+ * The exponent is k/12 of the ANNUAL rate: inflation compounds, so the monthly deflator
+ * is the equivalent (actuarial) one, never the annual rate divided by twelve. Same
+ * distinction as §4.4 makes for the interest rate, and for the same reason.
+ *
+ * @param {number} annualInflation e.g. 0.02 for 2 % a year; may be negative
+ * @param {number} monthIndex rank of the instalment, 1-based
+ */
+export function deflator(annualInflation, monthIndex) {
+  return Math.pow(1 + annualInflation, monthIndex / 12);
+}
+
+/**
+ * Fisher's real rate: what the lender actually earns once inflation has eaten its share.
+ *
+ *   (1 + nominal) / (1 + inflation) − 1
+ *
+ * Not `nominal − inflation`, which is only its first-order approximation; the two differ
+ * by `inflation × real`, small at these rates but not zero, and this tool does not round
+ * away the things it can state exactly.
+ */
+export function realRate(annualNominal, annualInflation) {
+  return (1 + annualNominal) / (1 + annualInflation) - 1;
+}
+
+/**
+ * Restates a schedule in euros of the loan's start date.
+ *
+ * Every instalment is deflated at ITS OWN date before being summed — deflating the final
+ * cumulative total instead would price twenty years of payments as if they had all been
+ * made on the last day, and overstates the erosion enormously.
+ *
+ * Returns new rows; the nominal figures are left untouched, because they are what is
+ * actually transferred each month.
+ *
+ * @param {Array<object>} schedule rows from buildSchedule()
+ * @param {number} annualInflation
+ */
+export function inConstantEuros(schedule, annualInflation) {
+  let cumulativeInterest = 0;
+  let cumulativeCapital = 0;
+
+  return schedule.map((row) => {
+    const factor = deflator(annualInflation, row.number);
+    const interest = row.interest / factor;
+    const capital = row.capital / factor;
+
+    cumulativeInterest += interest;
+    cumulativeCapital += capital;
+
+    return {
+      ...row,
+      constantInstalment: row.instalment / factor,
+      constantInterest: interest,
+      constantCapital: capital,
+      constantBalance: row.balance / factor,
+      constantCumulativeInterest: cumulativeInterest,
+      constantCumulativeCapital: cumulativeCapital
+    };
+  });
 }
 
 /** Proportional annual rate — the convention French loan offers quote (§4.4). */

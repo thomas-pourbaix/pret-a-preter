@@ -62,6 +62,24 @@ describe("workbook payload", () => {
     expect(sheets[0].columns).toHaveLength(3);
     expect(sheets[1].columns).toHaveLength(SCHEDULE_HEADERS.length);
   });
+
+  // Scrolling to instalment 180 on a 240-row sheet otherwise loses both the column names
+  // and the date of the row being read.
+  it("freezes the header row and the two identifying columns of the schedule", () => {
+    expect(sheets[1].stickyRowsCount).toBe(1);
+    expect(sheets[1].stickyColumnsCount).toBe(2);
+  });
+
+  it("freezes the header row of the assumptions sheet too", () => {
+    expect(sheets[0].stickyRowsCount).toBe(1);
+  });
+
+  it("states the inflation assumption and the real rate", () => {
+    const values = sheets[0].data.map((row) => row[0] && row[0].value);
+    expect(values).toContain("Taux d'inflation annuel");
+    expect(values).toContain("Taux annuel réel");
+    expect(values).toContain("Coût des intérêts (€ constants)");
+  });
 });
 
 describe("workbook writing", () => {
@@ -101,7 +119,7 @@ describe("csv", () => {
 
   it("separates with semicolons and uses comma decimals", () => {
     const first = lines[1].split(";");
-    expect(first).toHaveLength(8);
+    expect(first).toHaveLength(SCHEDULE_HEADERS.length);
     expect(first[0]).toBe("1");
     expect(first[1]).toBe("2026-09-05");
     expect(first[2]).toBe("1050");

@@ -17,11 +17,15 @@ import {
   annualNominalRate,
   balanceAfterConstantInstalments,
   buildSchedule,
+  deflator,
+  PRINCIPAL_STEP,
   periodicPayment,
   rateForExactInstalment,
+  realRate,
   round2,
   solveLoan,
   solveRate,
+  solveWithinTolerances,
   toIsoDate
 } from "../src/core/finance.js";
 
@@ -404,6 +408,213 @@ describe("the round-instalment rate is the one that settles the loan", () => {
     expect(plain.roundPayment.applied).toBe(false);
     expect(plain.payment).toBe(1_050);
     expect(plain.schedule[239].instalment).toBe(1_049.96);
+  });
+});
+
+/* ------------------------------------------------- negotiating margins (INV-010) */
+
+describe("INV-010 — a solution honours every margin it was given", () => {
+  const rateObjective = (value, tolerance) => ({ kind: "rate", value, tolerance });
+  const costObjective = (value, tolerance) => ({ kind: "cost", value, tolerance });
+
+  const cases = [
+    [5_100, 200, 48, rateObjective(0.03, 0.001)],
+    [5_100, 200, 60, rateObjective(0.03, 0.001)],
+    [5_100, 200, 24, rateObjective(0.03, 0.001)],
+    [12_000, 500, 60, rateObjective(0.035, 0.002)],
+    [20_000, 1_000, 84, rateObjective(0.025, 0.001)],
+    [12_000, 500, 48, costObjective(900, 60)]
+  ];
+
+  it.each(cases)("P=%s ±%s n=%s stays inside both margins", (principal, tol, periods, objective) => {
+    const found = solveWithinTolerances({
+      principal,
+      principalTolerance: tol,
+      periods,
+      objective
+    });
+
+    expect(found.found).toBe(true);
+    expect(Math.abs(found.principalOffset)).toBeLessThanOrEqual(tol);
+    expect(Math.abs(found.objectiveOffset)).toBeLessThanOrEqual(objective.tolerance + 1e-9);
+  });
+
+  it.each(cases)("P=%s ±%s n=%s lends a whole hundred", (principal, tol, periods, objective) => {
+    const { principal: lent } = solveWithinTolerances({
+      principal,
+      principalTolerance: tol,
+      periods,
+      objective
+    });
+    expect(lent % PRINCIPAL_STEP).toBe(0);
+  });
+
+  it.each(cases)("P=%s ±%s n=%s settles with identical whole-euro instalments", (principal, tol, periods, objective) => {
+    const found = solveWithinTolerances({
+      principal,
+      principalTolerance: tol,
+      periods,
+      objective
+    });
+
+    expect(Number.isInteger(found.payment)).toBe(true);
+    expect(balanceAfterConstantInstalments(found.principal, periods, found.payment, found.rate)).toBe(0);
+
+    const schedule = buildSchedule({
+      principal: found.principal,
+      rate: found.rate,
+      periods,
+      payment: found.payment,
+      startDate: START,
+      settleWithLastInstalment: false
+    });
+    expect(schedule).toHaveLength(periods);
+    expect(new Set(schedule.map((row) => row.instalment))).toEqual(new Set([found.payment]));
+    expect(schedule[periods - 1].balance).toBe(0);
+  });
+
+  it("keeps the amount exactly as typed when no margin is allowed on it", () => {
+    const found = solveWithinTolerances({
+      principal: 5_100,
+      principalTolerance: 0,
+      periods: 48,
+      objective: rateObjective(0.03, 0.001)
+    });
+    expect(found.found).toBe(true);
+    expect(found.principal).toBe(5_100);
+  });
+});
+
+describe("the hints given when nothing fits actually work", () => {
+  const tight = {
+    principal: 5_100,
+    principalTolerance: 0,
+    periods: 60,
+    objective: { kind: "rate", value: 0.03, tolerance: 0.00001 }
+  };
+
+  it("finds no solution on a deliberately impossible ask", () => {
+    expect(solveWithinTolerances(tight).found).toBe(false);
+  });
+
+  // The real test of a hint is not that it renders, but that following it works.
+  it("widening the objective by the amount suggested yields a solution", () => {
+    const { hints } = solveWithinTolerances(tight);
+    expect(hints.widenObjective).not.toBeNull();
+
+    const widened = solveWithinTolerances({
+      ...tight,
+      objective: { ...tight.objective, tolerance: hints.widenObjective.needed + 1e-12 }
+    });
+    expect(widened.found).toBe(true);
+  });
+
+  it("widening the principal by the amount suggested yields a solution", () => {
+    const spacious = {
+      principal: 12_000,
+      principalTolerance: 100,
+      periods: 48,
+      objective: { kind: "cost", value: 900, tolerance: 5 }
+    };
+    const { hints } = solveWithinTolerances(spacious);
+    expect(hints.widenPrincipal).not.toBeNull();
+
+    const widened = solveWithinTolerances({
+      ...spacious,
+      principalTolerance: hints.widenPrincipal.needed
+    });
+    expect(widened.found).toBe(true);
+  });
+
+  it("suggests a strictly larger margin than the one that already failed", () => {
+    const { hints } = solveWithinTolerances(tight);
+    expect(hints.widenObjective.needed).toBeGreaterThan(tight.objective.tolerance);
+  });
+
+  // Regression: the hint search used to call the public entry point, which builds hints
+  // when it finds nothing, which searched again — folding back on itself exponentially.
+  it("returns promptly instead of recursing into itself", () => {
+    const started = Date.now();
+    solveWithinTolerances(tight);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+});
+
+/* ---------------------------------------------------------- purchasing power */
+
+describe("INV-009 — constant euros", () => {
+  const solve = (annualInflation) =>
+    solveLoan({
+      principal: 200_000,
+      periods: 240,
+      totalCost: 52_000,
+      startDate: START,
+      annualInflation
+    });
+
+  it("leaves every figure untouched at zero inflation", () => {
+    const { schedule, constantCost, effectiveCost } = solve(0);
+
+    expect(constantCost).toBeCloseTo(effectiveCost, 8);
+    for (const row of schedule) {
+      expect(row.constantInstalment).toBeCloseTo(row.instalment, 10);
+      expect(row.constantBalance).toBeCloseTo(row.balance, 10);
+      expect(row.constantCumulativeInterest).toBeCloseTo(row.cumulativeInterest, 8);
+    }
+  });
+
+  it("erodes every instalment when prices rise, more so the later it falls", () => {
+    const { schedule } = solve(0.02);
+    let previousRatio = Infinity;
+
+    for (const row of schedule) {
+      expect(row.constantInstalment).toBeLessThan(row.instalment);
+      const ratio = row.constantInstalment / row.instalment;
+      expect(ratio).toBeLessThan(previousRatio);
+      previousRatio = ratio;
+    }
+  });
+
+  it("inflates every instalment under deflation", () => {
+    for (const row of solve(-0.01).schedule) {
+      expect(row.constantInstalment).toBeGreaterThan(row.instalment);
+    }
+  });
+
+  // The mistake this guards against: deflating the final cumulative total instead of
+  // each instalment at its own date, which prices twenty years of payments as if they
+  // had all been made on the last day.
+  it("deflates each instalment at its own date, not the total at the end", () => {
+    const { schedule, constantCost } = solve(0.02);
+    const last = schedule[schedule.length - 1];
+    const naive = last.cumulativeInterest / deflator(0.02, last.number);
+
+    expect(constantCost).toBeCloseTo(
+      schedule.reduce((sum, row) => sum + row.interest / deflator(0.02, row.number), 0),
+      6
+    );
+    expect(constantCost).toBeGreaterThan(naive);
+  });
+
+  it("uses the equivalent monthly deflator, never the annual rate over twelve", () => {
+    expect(deflator(0.02, 12)).toBeCloseTo(1.02, 12);
+    expect(deflator(0.02, 6)).toBeCloseTo(Math.sqrt(1.02), 12);
+    expect(deflator(0.02, 1)).toBeLessThan(1 + 0.02 / 12);
+    expect(deflator(0, 240)).toBe(1);
+  });
+
+  it("computes Fisher's real rate, which the subtraction only approximates", () => {
+    expect(realRate(0.024094, 0.02)).toBeCloseTo(1.024094 / 1.02 - 1, 12);
+    expect(realRate(0.03, 0)).toBeCloseTo(0.03, 12);
+
+    const exact = realRate(0.024094, 0.02);
+    const approximation = 0.024094 - 0.02;
+    expect(approximation).toBeGreaterThan(exact);
+    expect(approximation - exact).toBeCloseTo(0.02 * exact, 9);
+  });
+
+  it("turns the real rate negative once inflation outruns the loan", () => {
+    expect(solve(0.05).realAnnualRate).toBeLessThan(0);
   });
 });
 

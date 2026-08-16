@@ -7,6 +7,7 @@ import { addMonths, solveLoan, toIsoDate } from "../core/finance.js";
 import {
   formatEuro,
   formatEuroRounded,
+  formatMonth,
   formatNumber,
   formatPercent,
   parseFrenchNumber
@@ -61,8 +62,27 @@ function readInputs() {
     ? new Date(`${el("start").value}T12:00:00`)
     : new Date();
   const roundPayment = el("round-payment").checked;
+  const annualInflation = parseFrenchNumber(el("inflation").value) / 100;
 
-  return { principal, periods, rateIsKnown, totalCost, annualRate, startDate, roundPayment };
+  // The margin applies to whichever quantity is being aimed at, so it comes from the
+  // field that is currently on screen.
+  const principalTolerance = Math.abs(parseFrenchNumber(el("principal-tolerance").value)) || 0;
+  const objectiveTolerance = rateIsKnown
+    ? Math.abs(parseFrenchNumber(el("rate-tolerance").value) / 100) || 0
+    : Math.abs(parseFrenchNumber(el("cost-tolerance").value)) || 0;
+
+  return {
+    principal,
+    periods,
+    rateIsKnown,
+    totalCost,
+    annualRate,
+    startDate,
+    roundPayment,
+    annualInflation,
+    principalTolerance,
+    objectiveTolerance
+  };
 }
 
 /** Returns a message to show, or null when the inputs are usable. */
@@ -86,6 +106,13 @@ function validate(inputs) {
   } else if (!Number.isFinite(inputs.totalCost) || inputs.totalCost < 0) {
     return "Indiquez un coût total positif ou nul.";
   }
+  if (!Number.isFinite(inputs.annualInflation)) {
+    return "Indiquez un taux d'inflation, même nul.";
+  }
+  // Below −100 % the deflator turns negative and every constant-euro figure with it.
+  if (inputs.annualInflation <= -1) {
+    return "Le taux d'inflation doit rester supérieur à −100 %.";
+  }
   return null;
 }
 
@@ -107,11 +134,17 @@ function compute() {
     state.solved = null;
     setExportsEnabled(false);
     // Notes describe a result; with no result they would describe the previous one.
-    for (const id of ["round-note", "rate-warning", "convergence-warning"]) {
+    for (const id of [
+      "round-note",
+      "rate-warning",
+      "convergence-warning",
+      "constant-euros",
+      "tolerance-note"
+    ]) {
       el(id).hidden = true;
     }
     renderTable({ tbody: el("tbody"), schedule: [], view: state.view });
-    renderCharts([], 0);
+    renderCharts([], 0, 0);
     return;
   }
 
@@ -122,6 +155,9 @@ function compute() {
     periods: inputs.periods,
     startDate: inputs.startDate,
     roundPayment: inputs.roundPayment,
+    annualInflation: inputs.annualInflation,
+    principalTolerance: inputs.principalTolerance,
+    objectiveTolerance: inputs.objectiveTolerance,
     ...(inputs.rateIsKnown
       ? { periodicRate: inputs.annualRate / 12 }
       : { totalCost: inputs.totalCost })
@@ -130,16 +166,17 @@ function compute() {
   setExportsEnabled(true);
   renderReadout();
   renderTable({ tbody: el("tbody"), schedule: state.solved.schedule, view: state.view });
-  renderCharts(state.solved.schedule, state.solved.principal);
+  renderCharts(state.solved.schedule, state.solved.principal, state.solved.annualInflation);
 }
 
-function renderCharts(schedule, principal) {
+function renderCharts(schedule, principal, annualInflation) {
   renderInstalmentChart({ svg: el("chart"), probe: el("probe"), schedule });
   renderBalanceChart({
     svg: el("chart-balance"),
     probe: el("probe-balance"),
     schedule,
-    principal
+    principal,
+    annualInflation
   });
 }
 
@@ -159,7 +196,9 @@ function renderReadout() {
         : "taux résolu";
 
   renderRateWarning(solved);
+  renderToleranceNote(solved);
   renderRoundNote(solved);
+  renderConstantEuros(solved);
 
   el("substituted").replaceChildren(
     strong(formatNumber(payment)),
@@ -204,6 +243,127 @@ function renderReadout() {
 
   const warning = el("convergence-warning");
   warning.hidden = solved.converged;
+}
+
+/**
+ * The negotiating margins, and what came of them.
+ *
+ * When a combination fits, it says which amount and which rate were actually retained,
+ * because both may differ from what was typed. When none fits, refusing in silence would
+ * leave the lender stuck mid-negotiation, so it says how far each concession would have
+ * to go — separately, since giving on the amount and giving on the rate are two
+ * different conversations to have with the borrower.
+ */
+function renderToleranceNote(solved) {
+  const note = el("tolerance-note");
+  const result = solved.tolerances;
+
+  if (!result) {
+    note.hidden = true;
+    return;
+  }
+
+  note.hidden = false;
+  const rateMode = solved.rateIsKnown;
+
+  if (result.found) {
+    note.classList.add("info");
+    const movedPrincipal = solved.principal !== solved.requestedPrincipal;
+    note.replaceChildren(
+      text("Dans vos marges : "),
+      strong(`${formatEuroRounded(solved.principal)} prêtés`),
+      text(
+        movedPrincipal
+          ? ` (au lieu de ${formatEuroRounded(solved.requestedPrincipal)}), `
+          : " comme demandé, "
+      ),
+      strong(`${solved.periods} × ${formatEuroRounded(solved.payment)}`),
+      text(", taux "),
+      strong(formatPercent(solved.annualNominalRate, 4)),
+      text(`, coût ${formatEuro(solved.effectiveCost)}. `),
+      text(
+        result.alternatives > 1
+          ? `${result.alternatives} combinaisons convenaient ; voici la plus proche de vos intentions.`
+          : "C'était la seule combinaison possible."
+      )
+    );
+    return;
+  }
+
+  note.classList.remove("info");
+  const { widenObjective, widenPrincipal } = result.hints;
+  const objectiveUnit = (value) =>
+    rateMode ? formatPercent(value, 4) : formatEuro(value);
+
+  const parts = [
+    strong("Aucune combinaison ne tient dans vos marges."),
+    text(" Pour en trouver une, il faudrait élargir ")
+  ];
+
+  if (widenObjective) {
+    parts.push(
+      text(rateMode ? "la marge de taux à ±" : "la marge de coût à ±"),
+      strong(objectiveUnit(widenObjective.needed)),
+      text(
+        ` (${formatEuroRounded(widenObjective.principal)} prêtés, ` +
+          `${solved.periods} × ${formatEuroRounded(widenObjective.payment)})`
+      )
+    );
+  }
+
+  if (widenObjective && widenPrincipal) parts.push(text(", ou bien "));
+
+  if (widenPrincipal) {
+    parts.push(
+      text("la marge sur la somme prêtée à ±"),
+      strong(formatEuroRounded(widenPrincipal.needed)),
+      text(
+        ` — ${formatEuroRounded(widenPrincipal.principal)} conviendrait, ` +
+          `${solved.periods} × ${formatEuroRounded(widenPrincipal.payment)} à ` +
+          `${formatPercent(widenPrincipal.rate * 12, 4)}`
+      )
+    );
+  }
+
+  if (!widenObjective && !widenPrincipal) {
+    parts.push(text("nettement les deux marges : rien n'a été trouvé à portée raisonnable."));
+  } else {
+    parts.push(text("."));
+  }
+
+  // Something is still displayed below, and it is not what was asked for. Say which.
+  parts.push(
+    text(
+      solved.roundPayment.applied
+        ? " En attendant, le calcul ci-dessous garde la mensualité ronde et laisse le" +
+          " taux sortir de votre marge."
+        : " En attendant, le calcul ci-dessous revient à la convention bancaire," +
+          " dernière échéance ajustée."
+    )
+  );
+
+  note.replaceChildren(...parts);
+}
+
+/**
+ * Purchasing power, shown underneath the nominal figures and never in place of them:
+ * what leaves the account each month is the nominal instalment, and that is the number
+ * someone setting up a standing order needs. Constant euros answer a different question.
+ *
+ * Hidden entirely at zero inflation, where the two readings coincide and the block would
+ * only repeat the line above it.
+ */
+function renderConstantEuros(solved) {
+  const block = el("constant-euros");
+  const active = Math.abs(solved.annualInflation) > 1e-9;
+
+  block.hidden = !active;
+  if (!active) return;
+
+  el("constant-basis").textContent = `de ${formatMonth(solved.schedule[0].date)}`;
+  el("out-constant-cost").textContent = formatEuro(solved.constantCost);
+  el("out-constant-total").textContent = formatEuro(solved.constantTotalPaid);
+  el("out-real-rate").textContent = formatPercent(solved.realAnnualRate, 3);
 }
 
 /** Above this nominal annual rate, the inputs are almost certainly a slip, not a loan. */

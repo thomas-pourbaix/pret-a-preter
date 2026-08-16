@@ -151,6 +151,32 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
 .metric .v{font-family:var(--mono);font-size:clamp(19px,2.6vw,25px);font-weight:500;letter-spacing:-.01em}
 .metric .v.big{color:var(--interest)}
 .metric .sub{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);display:block;margin-top:2px}
+/* negotiating margins, subordinate to the field they qualify */
+.tolerance{display:flex;align-items:center;gap:8px;margin-top:6px}
+.tolerance > label{
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);
+  letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+}
+.tolerance input{
+  font-family:var(--mono);font-size:13px;color:var(--ink);
+  width:5.5em;padding:5px 8px;border:1px solid var(--rule);border-radius:var(--r);background:#fff;
+}
+.tolerance .unit{font-family:var(--mono);font-size:12.5px;color:var(--ink-soft)}
+
+/* purchasing power: a secondary reading, never louder than the nominal figures */
+.constant-euros{
+  margin-top:16px;padding:12px 14px;border:1px dashed var(--grid-major);border-radius:var(--r);
+  background:#FBFCFC;
+}
+.constant-euros .k{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);display:block;margin-bottom:6px;
+}
+.constant-figures{
+  display:flex;flex-wrap:wrap;gap:6px 22px;
+  font-family:var(--mono);font-size:12.5px;color:var(--ink-soft);
+}
+.constant-figures b{color:var(--capital);font-weight:600}
 .convergence{
   margin-top:18px;padding-top:12px;border-top:1px solid var(--rule);
   font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);
@@ -252,6 +278,12 @@ section{margin-bottom:22px}
             <input type="text" id="principal" inputmode="decimal" value="200 000">
             <span class="suffix">€</span>
           </div>
+          <div class="tolerance">
+            <label for="principal-tolerance">marge&nbsp;±</label>
+            <input type="text" id="principal-tolerance" inputmode="decimal" value="0">
+            <span class="unit">€</span>
+          </div>
+          <span class="hint">La somme prêtée se négocie par tranches de 100 €. Donnez une marge pour laisser le calcul chercher un montant voisin qui tombe juste.</span>
         </div>
 
         <div class="field">
@@ -272,6 +304,11 @@ section{margin-bottom:22px}
             <input type="text" id="cost" inputmode="decimal" value="52 000">
             <span class="suffix">€</span>
           </div>
+          <div class="tolerance">
+            <label for="cost-tolerance">marge&nbsp;±</label>
+            <input type="text" id="cost-tolerance" inputmode="decimal" value="0">
+            <span class="unit">€</span>
+          </div>
           <span class="hint">Intérêts seuls, hors assurance et frais de dossier.</span>
         </div>
 
@@ -280,6 +317,11 @@ section{margin-bottom:22px}
           <div class="control">
             <input type="text" id="rate" inputmode="decimal" value="2,45">
             <span class="suffix">%</span>
+          </div>
+          <div class="tolerance">
+            <label for="rate-tolerance">marge&nbsp;±</label>
+            <input type="text" id="rate-tolerance" inputmode="decimal" value="0">
+            <span class="unit">%</span>
           </div>
           <span class="hint">Chaque échéance applique ce taux <strong>divisé par 12</strong>. C'est la convention proportionnelle des offres de prêt françaises — à ne pas confondre avec le taux équivalent, actuariel, affiché à droite.</span>
         </div>
@@ -290,6 +332,15 @@ section{margin-bottom:22px}
             <span>Mensualité en euros ronds</span>
           </label>
           <span class="hint">Toutes les échéances rigoureusement identiques, sans centimes. Le taux est ajusté pour que le prêt se solde exactement — pratique pour un virement permanent.</span>
+        </div>
+
+        <div class="field">
+          <label for="inflation">Taux d'inflation annuel</label>
+          <div class="control">
+            <input type="text" id="inflation" inputmode="decimal" value="2">
+            <span class="suffix">%</span>
+          </div>
+          <span class="hint">Sert à exprimer les montants en euros constants du départ. Mettez 0 pour raisonner en euros courants ; une valeur négative simule une déflation.</span>
         </div>
 
         <div class="field">
@@ -330,7 +381,17 @@ section{margin-bottom:22px}
           </div>
         </div>
 
+        <div class="constant-euros" id="constant-euros" hidden>
+          <span class="k">En euros constants <span id="constant-basis"></span></span>
+          <div class="constant-figures">
+            <span>coût des intérêts <b id="out-constant-cost">—</b></span>
+            <span>total versé <b id="out-constant-total">—</b></span>
+            <span>taux réel <b id="out-real-rate">—</b></span>
+          </div>
+        </div>
+
         <div class="note" id="rate-warning" hidden></div>
+        <div class="note" id="tolerance-note" hidden></div>
         <div class="note info" id="round-note" hidden></div>
         <div class="convergence" id="convergence" aria-live="polite"></div>
         <div class="note" id="convergence-warning" hidden>Le solveur n'a pas convergé : le coût demandé est hors de portée pour cette durée. Le taux affiché est une borne, pas une solution.</div>
