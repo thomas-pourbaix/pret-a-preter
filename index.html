@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Échéancier — prêt amortissable</title>
-<meta name="description" content="Calculer un prêt entre particuliers : à partir de la somme, de la durée et du coût convenus, le taux, la mensualité et l'échéancier mois par mois, exportables en tableur.">
+<meta name="description" content="Calculer un prêt entre particuliers : à partir de la somme, de la durée et du coût convenu — taux ou cumul d'intérêts — la mensualité en euros ronds et l'échéancier mois par mois, exportables en tableur.">
 
 <style>
 /* ---------------------------------------------------------------
@@ -120,6 +120,24 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
   width:auto;flex:0 0 auto;margin-left:-1px;border-radius:0 var(--r) var(--r) 0;
   background:var(--paper);font-size:13px;
 }
+/* Steppers. A loan is negotiated in round steps, and the solver is expensive enough that
+   every keystroke of a hand-typed amount is a wasted search: these buttons move the value
+   by a whole step at a time, and are the fast path for the fields that have one. */
+.stepper{display:flex;gap:4px;margin-top:6px}
+.stepper button{
+  flex:1;min-width:0;padding:4px 0;
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);
+  border:1px solid var(--rule);border-radius:var(--r);background:var(--paper);
+}
+.stepper button:hover:not(:disabled){border-color:var(--ink-faint);color:var(--ink);background:#fff}
+.stepper.compact{margin-top:4px}
+
+/* An optional reading of the whole page, switched on and off as a whole. */
+.toggle{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;cursor:pointer}
+.toggle input{width:15px;height:15px;margin:0;accent-color:var(--interest);cursor:pointer}
+.sub-label{display:block;font-size:12px;color:var(--ink-soft);margin:10px 0 5px}
+#inflation-controls[hidden]{display:none}
+
 .switch{display:flex;border:1px solid var(--rule);border-radius:var(--r);overflow:hidden;margin-bottom:16px}
 .switch input{position:absolute;opacity:0;width:0;height:0}
 /* Both halves keep the same width even though one label is much longer, so the wrapped
@@ -135,15 +153,46 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
 
 /* readout ----------------------------------------------------- */
 .readout .panel-body{padding:22px 24px}
-.solved{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
-@media(max-width:620px){.solved{grid-template-columns:1fr}}
-.metric .k{
+/* A keystroke is acknowledged even though the search behind it waits for a pause. */
+.readout[data-pending] .panel-body{opacity:.5;transition:opacity .1s}
+
+/* The balance sheet: what was wished for on the left, what will be signed on the
+   right. Two columns of figures side by side, so the gap between the intention and
+   the contract is read rather than explained. */
+.balance{width:100%;border-collapse:collapse;font-family:var(--body)}
+.balance thead th{
+  position:static;background:transparent;border-bottom:1px solid var(--ink);
   font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--ink-faint);display:block;margin-bottom:3px;
+  font-weight:500;color:var(--ink-faint);padding:0 0 8px;text-align:right;
 }
-.metric .v{font-family:var(--mono);font-size:clamp(19px,2.6vw,25px);font-weight:500;letter-spacing:-.01em}
-.metric .v.big{color:var(--interest)}
-.metric .sub{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);display:block;margin-top:2px}
+.balance thead th.term{text-align:left}
+.balance thead th.final{color:var(--ink-soft)}
+.balance tbody th,.balance tbody td{
+  padding:9px 0;border-bottom:1px solid var(--grid-minor);
+  text-align:right;vertical-align:baseline;white-space:normal;
+}
+.balance tbody tr:last-child th,.balance tbody tr:last-child td{border-bottom:0}
+.balance tbody tr:hover td{background:transparent}
+.balance th.term{
+  text-align:left;font-weight:400;font-size:12.5px;color:var(--ink-soft);padding-right:14px;
+}
+.balance td.wish,.balance td.final{font-family:var(--mono);padding-left:14px;width:31%}
+.balance td.wish{color:var(--ink-faint);font-size:14px}
+.balance td.final{color:var(--ink);font-size:15px;font-weight:500}
+.balance tr.hero td.final{color:var(--interest);font-size:clamp(19px,2.4vw,24px);letter-spacing:-.01em}
+.balance tr.hero td.wish{font-size:15px}
+.balance .sub{
+  display:block;font-family:var(--mono);font-size:11px;font-weight:400;
+  color:var(--ink-faint);margin-top:3px;
+}
+.balance .sub.gap{color:var(--adjust)}
+@media(max-width:620px){
+  .balance td.wish,.balance td.final{width:auto}
+  .balance th.term{font-size:12px}
+}
+.balance-caption{
+  margin:12px 0 0;font-size:12.5px;color:var(--ink-soft);
+}
 /* negotiating margins, subordinate to the field they qualify */
 .tolerance{display:flex;align-items:center;gap:8px;margin-top:6px}
 .tolerance > label{
@@ -181,16 +230,19 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
 }
 .note.info{border-left-color:var(--capital);background:#F0F6F5;color:#14484D}
 .note b{font-weight:600}
-.field.check > label{
-  display:flex;align-items:flex-start;gap:8px;font-weight:600;cursor:pointer;margin-bottom:0;
-}
-.field.check input{margin:2px 0 0;flex:0 0 auto;accent-color:var(--interest);width:15px;height:15px}
 [hidden]{display:none !important}
 
 /* chart ------------------------------------------------------- */
-.chart-legend{display:flex;gap:18px;font-family:var(--mono);font-size:11.5px;color:var(--ink-soft)}
+.chart-legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-family:var(--mono);font-size:11.5px;color:var(--ink-soft)}
 .chip{display:inline-flex;align-items:center;gap:6px}
 .chip i{width:10px;height:2px;display:inline-block}
+/* Same swatch, drawn as the dashes actually are: the constant-euro curves. */
+.chip i.dashed{
+  width:14px;margin-right:-4px;opacity:.75;
+  background-image:linear-gradient(90deg,currentColor 0 4px,transparent 4px 7px);
+  background-size:7px 2px;
+}
+.chip i.dashed + i.dashed{margin-right:0}
 svg .axis{font-family:var(--mono);font-size:10px;fill:var(--ink-faint)}
 svg .gridline{stroke:var(--grid-minor);stroke-width:1}
 .probe{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-top:8px;min-height:2.8em}
@@ -248,8 +300,8 @@ section{margin-bottom:22px}
 
   <header class="masthead">
     <p class="eyebrow">Prêt amortissable · mensualités constantes</p>
-    <h1>Le prêt entre particuliers,<br>chiffré <em>ligne à ligne</em>.</h1>
-    <p class="statement">Deux personnes s'accordent sur une somme, une durée et ce que l'emprunt coûtera — reste à savoir quel taux cela représente et combien on paie chaque mois. Cet outil résout l'un ou l'autre, déroule chaque échéance et exporte le tout en tableur. Aucune convention n'est implicite : elles sont toutes écrites en bas de page.</p>
+    <h1>Le prêt entre particuliers,<br>chiffré <em>échéance par échéance</em>.</h1>
+    <p class="statement">Deux personnes s'accordent sur une somme, une durée et ce que l'emprunt coûtera — un taux, ou un cumul d'intérêts. Cet outil part de l'un ou de l'autre, en tire une mensualité en euros ronds identique du premier au dernier mois, déroule chaque échéance et exporte le tout en tableur. Aucune convention n'est implicite : elles sont toutes écrites en bas de page.</p>
   </header>
 
   <section class="solver">
@@ -268,7 +320,7 @@ section{margin-bottom:22px}
         <div class="field">
           <label for="principal">Somme empruntée</label>
           <div class="control">
-            <input type="text" id="principal" inputmode="decimal" value="200 000">
+            <input type="text" id="principal" inputmode="decimal" value="10 000">
             <span class="suffix">€</span>
           </div>
           <div class="tolerance">
@@ -276,25 +328,25 @@ section{margin-bottom:22px}
             <input type="text" id="principal-tolerance" inputmode="decimal" value="0">
             <span class="unit">€</span>
           </div>
-          <span class="hint">La somme prêtée se négocie par tranches de 100 €. Donnez une marge pour laisser le calcul chercher un montant voisin qui tombe juste.</span>
+          <span class="hint">La somme prêtée se négocie par tranches de 100 € : une saisie qui tombe entre deux est ramenée à la plus proche.</span>
         </div>
 
         <div class="field">
           <label for="term">Durée d'emprunt</label>
           <div class="control">
-            <input type="text" id="term" inputmode="numeric" value="20">
+            <input type="text" id="term" inputmode="numeric" value="10">
             <select id="term-unit" class="suffix-select" aria-label="Unité de durée">
               <option value="years" selected>années</option>
               <option value="months">mois</option>
             </select>
           </div>
-          <span class="hint" id="term-hint">240 mensualités</span>
+          <span class="hint" id="term-hint">120 mensualités</span>
         </div>
 
         <div class="field" id="field-cost">
           <label for="cost">Coût cumulé de l'emprunt</label>
           <div class="control">
-            <input type="text" id="cost" inputmode="decimal" value="52 000">
+            <input type="text" id="cost" inputmode="decimal" value="1 587">
             <span class="suffix">€</span>
           </div>
           <div class="tolerance">
@@ -302,13 +354,13 @@ section{margin-bottom:22px}
             <input type="text" id="cost-tolerance" inputmode="decimal" value="0">
             <span class="unit">€</span>
           </div>
-          <span class="hint">Intérêts seuls, hors assurance et frais de dossier.</span>
+          <span class="hint">Intérêts seuls, hors assurance et frais de dossier. 1 587 € est ce que coûte la valeur par défaut ci-dessus à 3 % l'an.</span>
         </div>
 
         <div class="field" id="field-rate" hidden>
           <label for="rate">Taux annuel nominal</label>
           <div class="control">
-            <input type="text" id="rate" inputmode="decimal" value="2,45">
+            <input type="text" id="rate" inputmode="decimal" value="3,00">
             <span class="suffix">%</span>
           </div>
           <div class="tolerance">
@@ -316,24 +368,22 @@ section{margin-bottom:22px}
             <input type="text" id="rate-tolerance" inputmode="decimal" value="0">
             <span class="unit">%</span>
           </div>
-          <span class="hint">Chaque échéance applique ce taux <strong>divisé par 12</strong>, comme le font les offres de prêt françaises.</span>
+          <span class="hint">Un taux se négocie par pas de 0,05 point ; une saisie intermédiaire est ramenée au plus proche. Chaque échéance applique ce taux <strong>divisé par 12</strong>, comme le font les offres de prêt françaises.</span>
         </div>
 
-        <div class="field check">
-          <label for="round-payment">
-            <input type="checkbox" id="round-payment" checked>
-            <span>Mensualité en euros ronds</span>
+        <div class="field" id="field-inflation">
+          <label class="toggle" for="inflation-on">
+            <input type="checkbox" id="inflation-on" checked>
+            <span>Vision inflation</span>
           </label>
-          <span class="hint">Toutes les échéances rigoureusement identiques, sans centimes. Le taux est ajusté pour que le prêt se solde exactement — pratique pour un virement permanent.</span>
-        </div>
-
-        <div class="field">
-          <label for="inflation">Taux d'inflation annuel</label>
-          <div class="control">
-            <input type="text" id="inflation" inputmode="decimal" value="2">
-            <span class="suffix">%</span>
+          <div id="inflation-controls">
+            <label class="sub-label" for="inflation">Taux d'inflation annuel</label>
+            <div class="control">
+              <input type="text" id="inflation" inputmode="decimal" value="2">
+              <span class="suffix">%</span>
+            </div>
           </div>
-          <span class="hint">Sert à exprimer les montants en euros constants du départ. Mettez 0 pour raisonner en euros courants ; une valeur négative simule une déflation.</span>
+          <span class="hint">Ajoute partout une seconde lecture en euros constants du départ : le bloc sous le bilan, les courbes en pointillés du second graphique, deux colonnes dans les exports. Décochez pour raisonner en euros courants seulement.</span>
         </div>
 
         <div class="field">
@@ -344,30 +394,24 @@ section{margin-bottom:22px}
       </div>
     </form>
 
-    <div class="panel readout">
+    <div class="panel readout" id="readout">
       <div class="panel-head">
-        <h2>Résolution</h2>
-        <span class="eyebrow" style="margin:0" id="mode-tag">taux résolu</span>
+        <h2>Bilan</h2>
+        <span class="eyebrow" style="margin:0" id="mode-tag">coût fixé</span>
       </div>
       <div class="panel-body">
 
-        <div class="solved">
-          <div class="metric">
-            <span class="k">Mensualité</span>
-            <span class="v big" id="out-payment">—</span>
-            <span class="sub" id="out-payment-sub"></span>
-          </div>
-          <div class="metric">
-            <span class="k">Taux annuel nominal</span>
-            <span class="v" id="out-rate">—</span>
-            <span class="sub" id="out-rate-sub"></span>
-          </div>
-          <div class="metric">
-            <span class="k">Coût total des intérêts</span>
-            <span class="v" id="out-cost">—</span>
-            <span class="sub" id="out-cost-sub"></span>
-          </div>
-        </div>
+        <table class="balance">
+          <thead>
+            <tr>
+              <th scope="col" class="term">Terme</th>
+              <th scope="col" class="wish">Souhaité</th>
+              <th scope="col" class="final">Contractualisé</th>
+            </tr>
+          </thead>
+          <tbody id="balance-body"></tbody>
+        </table>
+        <p class="balance-caption" id="balance-caption"></p>
 
         <div class="constant-euros" id="constant-euros" hidden>
           <span class="k">En euros constants <span id="constant-basis"></span></span>
@@ -378,11 +422,14 @@ section{margin-bottom:22px}
           </div>
         </div>
 
-        <div class="note" id="rate-warning" hidden></div>
-        <div class="note" id="tolerance-note" hidden></div>
-        <div class="note info" id="round-note" hidden></div>
-        <div class="convergence" id="convergence" aria-live="polite"></div>
-        <div class="note" id="convergence-warning" hidden>Le solveur n'a pas convergé : le coût demandé est hors de portée pour cette durée. Le taux affiché est une borne, pas une solution.</div>
+        <!-- Everything below is a failure report. A run that finds what was asked for
+             says nothing here: the balance sheet above already shows it, term by term. -->
+        <div id="diagnostics" aria-live="polite">
+          <div class="note" id="rate-warning" hidden></div>
+          <div class="note" id="tolerance-note" hidden></div>
+          <div class="note info" id="round-note" hidden></div>
+          <div class="note" id="convergence-warning" hidden>Le solveur n'a pas convergé : le coût demandé est hors de portée pour cette durée. Le taux affiché est une borne, pas une solution.</div>
+        </div>
         <div class="note" id="error" role="alert" hidden></div>
       </div>
     </div>
@@ -411,6 +458,10 @@ section{margin-bottom:22px}
       <div class="chart-legend">
         <span class="chip"><i style="background:#1F6F78"></i>Capital restant dû</span>
         <span class="chip"><i style="background:#6A4CA8"></i>Intérêts cumulés</span>
+        <!-- The dashed pair used to be drawn with nothing to name it. -->
+        <span class="chip" id="legend-constant">
+          <i class="dashed" style="color:#1F6F78"></i><i class="dashed" style="color:#6A4CA8"></i>les mêmes en euros constants
+        </span>
       </div>
     </div>
     <div class="panel-body">
@@ -455,7 +506,8 @@ section{margin-bottom:22px}
     <ul>
       <li>Mensualité constante, intérêts calculés sur le capital restant dû au taux mensuel <em>i</em>, arrondis au centime à chaque échéance.</li>
       <li>Taux annuel nominal = <em>i</em> × 12 (taux proportionnel, convention des offres de prêt françaises).</li>
-      <li>La mensualité est arrondie au centime, donc la dernière échéance est ajustée pour solder exactement le capital. Les cumuls sont affichés à l'euro ; l'écart avec le coût saisi est signalé dès qu'il pèse un euro, jamais masqué.</li>
+      <li>La mensualité est un nombre entier d'euros, identique de la première à la dernière échéance : c'est le taux qui est choisi pour que ces échéances soldent le capital au centime, solde final 0,00 €. La mensualité ronde s'écarte donc de celle qui découlerait exactement de vos hypothèses, et le taux comme le coût s'en trouvent déplacés — le bilan affiche les deux colonnes, souhaité et contractualisé, et ne masque aucun écart.</li>
+      <li>Quand aucune mensualité ronde ne solde le prêt, même en s'écartant de 24 €, le calcul revient à la convention bancaire — mensualité au centime, dernière échéance ajustée — et le dit à l'écran. Les cumuls sont affichés à l'euro.</li>
       <li>Hors assurance emprunteur, frais de dossier, garantie et frais annexes : ce n'est donc pas un TAEG.</li>
       <li>Le tableur exporté contient les <strong>valeurs calculées</strong> et les hypothèses qui les produisent, sur deux onglets.</li>
     </ul>

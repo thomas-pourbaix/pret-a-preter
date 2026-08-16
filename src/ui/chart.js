@@ -206,8 +206,17 @@ export function renderInstalmentChart({ svg, probe, schedule }) {
  * @param {HTMLElement} params.probe text line updated on hover and on keyboard focus
  * @param {Array<object>} params.schedule rows from buildSchedule()
  * @param {number} params.principal borrowed amount, the starting level of the staircase
+ * @param {number} [params.annualInflation] rate the constant-euro pair is deflated at
+ * @param {boolean} [params.constantEuros] whether that pair is drawn at all
  */
-export function renderBalanceChart({ svg, probe, schedule, principal, annualInflation = 0 }) {
+export function renderBalanceChart({
+  svg,
+  probe,
+  schedule,
+  principal,
+  annualInflation = 0,
+  constantEuros = true
+}) {
   svg.replaceChildren();
   if (!schedule.length) {
     probe.textContent = PROBE_IDLE;
@@ -220,7 +229,7 @@ export function renderBalanceChart({ svg, probe, schedule, principal, annualInfl
   const baseline = HEIGHT - PADDING.bottom;
 
   const lastRow = schedule[schedule.length - 1];
-  const showConstant = Math.abs(annualInflation) > 1e-9;
+  const showConstant = constantEuros && Math.abs(annualInflation) > 1e-9;
 
   // Deflation pushes the constant-euro curves *above* the nominal ones, so the scale has
   // to consider them too rather than assume they always sit underneath.

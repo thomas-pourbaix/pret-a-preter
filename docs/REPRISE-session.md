@@ -1,7 +1,8 @@
 # Échéancier de prêt — brief de reprise de session
 
 > Document d'amorçage pour une nouvelle session Claude Code. Autoportant : il ne suppose
-> aucun accès aux conversations précédentes. Écrit le 16 août 2026.
+> aucun accès aux conversations précédentes. Écrit le 16 août 2026, mis à jour le même
+> jour après le **troisième** tour de retours d'interface (§8).
 
 ---
 
@@ -9,9 +10,9 @@
 
 Application web statique **en production** : <https://thomas-pourbaix.github.io/loan-schedule/>
 
-Elle résout le **taux** d'un prêt amortissable à partir du capital, de la durée et du coût
-cumulé — l'inverse de ce que font la plupart des calculateurs — puis déroule l'échéancier
-et l'exporte.
+Deux personnes s'accordent sur une somme, une durée et ce que l'emprunt coûtera — un taux
+ou un cumul d'intérêts. L'outil part de l'un ou de l'autre, en tire une **mensualité en
+euros ronds**, déroule l'échéancier et l'exporte.
 
 | | |
 |---|---|
@@ -19,9 +20,9 @@ et l'exporte.
 | Dépôt distant | <https://github.com/thomas-pourbaix/loan-schedule> (public, AGPL-3.0) |
 | Branche de travail | `feat/loan-schedule` — **non fusionnée** dans `main` |
 | Pages sert | la branche `feat/loan-schedule`, racine |
-| Tests | 161, tous verts (`npx vitest run`) |
-| Dernier commit | `f5f145c` |
-| Répertoire de travail | **modifications non commitées** : les cinq retours d'interface du §7 |
+| Tests | 170, tous verts (`npx vitest run`) |
+| Dernier commit | `7a42bec`, poussé — la page en ligne montre cet état |
+| Répertoire de travail | **modifications non commitées** : les tours de retours §7 et §8 |
 
 Le chemin local contient des accents et des espaces : **le quoter systématiquement** en bash.
 
@@ -75,24 +76,40 @@ fonction `RATE` de bibliothèque est délibéré : celles des tableurs (Formula.
 leur dernière itérée **sans rien signaler** quand elles ne convergent pas. Elles servent
 d'oracles de test, pas de moteur.
 
-**Mensualité en euros ronds** (par défaut). Toutes les échéances rigoureusement
-identiques, en euros entiers, prêt soldé à `0,00 €`. Possible parce que le taux est
-continu alors que le solde final ne prend que des valeurs en centimes : les taux qui
-soldent exactement forment un intervalle.
+**Mensualité en euros ronds — la seule convention**, plus une option. Toutes les échéances
+rigoureusement identiques, en euros entiers, prêt soldé à `0,00 €`. Possible parce que le
+taux est continu alors que le solde final ne prend que des valeurs en centimes : les taux
+qui soldent exactement forment un intervalle. Quand aucune mensualité ronde ne convient,
+même en s'écartant de 24 €, le calcul retombe sur la convention bancaire — mensualité au
+centime, dernière échéance ajustée — et le dit à l'écran. Le noyau garde les deux chemins
+(`solveLoan` conserve son paramètre `roundPayment`, tous deux testés) ; c'est l'interface
+qui ne propose plus le choix.
+
+**Bilan à deux colonnes**, « souhaité » et « contractualisé », une ligne par terme du prêt.
+C'est la conséquence directe du point précédent : la mensualité ronde déplace la somme
+prêtée, le taux et le coût par rapport à ce qui a été saisi, donc afficher le seul résultat
+réécrirait l'hypothèse en silence. Voir §7.1.
 
 **Marges de négociation.** Deux champs « marge ± » : sur la somme prêtée (qui se négocie
-par tranches de 100 €) et sur le taux ou le coût. Le mode euros ronds gagne alors trois
-degrés de liberté au lieu d'un. En cas d'échec, les deux concessions possibles sont
-chiffrées séparément.
+par tranches de 100 €) et sur le taux ou le coût. La recherche gagne alors trois degrés de
+liberté au lieu d'un. En cas d'échec, les deux concessions possibles sont chiffrées
+séparément.
 
-**Inflation**, 2 % par défaut. Lecture supplémentaire en euros constants du départ ; les
-montants nominaux restent l'affichage principal.
+**Inflation**, 2 % par défaut, sous une case « vision inflation » qui commande d'un bloc le
+bloc du bilan, les pointillés du graphique et les colonnes correspondantes des exports.
+Lecture supplémentaire en euros constants du départ ; les montants nominaux restent
+l'affichage principal.
 
 **Deux graphiques**, tous deux en escalier : composition de chaque échéance (bâtons
 jointifs, intérêts/capital) et extinction de la dette (avec les versions déflatées en
-pointillés).
+pointillés, nommées en légende).
 
-**Exports** CSV et XLSX (valeurs, pas de formules — hors périmètre), volets figés.
+**Exports** CSV et XLSX (valeurs, pas de formules — hors périmètre), volets figés, mise en
+page du classeur calculée à partir des données (§8.1).
+
+**Champs à pas.** Somme empruntée par tranches de 100 €, taux par pas de 0,05 point,
+marges comprises : une saisie intermédiaire est ramenée au plus proche à la sortie du
+champ. Boutons d'incrément fin et grossier sur chacun.
 
 ---
 
@@ -116,6 +133,12 @@ séparée de `solveWithinTolerances` pour cette raison : la version publique con
 indices quand elle échoue, et si les indices la rappellent, l'ensemble se replie
 exponentiellement sur lui-même. Un test verrouille le temps de réponse.
 
+**Les règles CSS globales du tableau d'échéancier mordent sur toute autre table.**
+`table`, `thead th` (collant, aligné à droite, capitales) et `tbody td` sont écrits sans
+classe. Le bilan du §7.1 doit donc surclasser chacune d'elles explicitement
+(`.balance td.wish`, pas `.balance .wish`) : à spécificité égale, c'est l'ordre dans la
+feuille qui tranche, et le bloc de l'échéancier vient après celui de la résolution.
+
 **Trois vrais bugs ont été trouvés en creusant des symptômes mineurs** — une valeur qui
 paraît bizarre mérite qu'on creuse, pas qu'on l'ajuste :
 
@@ -133,132 +156,214 @@ paraît bizarre mérite qu'on creuse, pas qu'on l'ajuste :
    ```bash
    gh api -X POST repos/:owner/loan-schedule/pages -f source[branch]=main -f source[path]=/
    ```
-2. **Saisir directement la mensualité voulue.** Le coût saisi n'est plus vraiment une
-   entrée en mode euros ronds : il sert à viser une mensualité, qui détermine ensuite le
-   coût. Un troisième bouton « je choisis la mensualité » serait plus honnête —
-   « je veux payer 1 000 € par mois pendant 20 ans, ça fait quel taux ? ».
-3. **Numéro de version en pied de page**, pour savoir d'un coup d'œil si l'on regarde la
+2. **Certificat de dette généré par l'application.** Annoncé par Thomas comme la suite : le
+   bilan « souhaité / contractualisé » du §7.1 est précisément ce qui doit s'y retrouver.
+   Rien n'est écrit à ce sujet, ni périmètre ni format ; à cadrer avant d'écrire du code.
+   Le cadre juridique (reconnaissance de dette, déclaration au-delà de 5 000 €) redevient
+   alors une question ouverte, jusqu'ici volontairement laissée hors de l'outil.
+3. **Saisir directement la mensualité voulue.** Devenu plus criant depuis que la mensualité
+   ronde est la seule convention : le coût saisi ne sert plus qu'à viser une mensualité,
+   qui détermine ensuite le coût réel. Un troisième bouton « je choisis la mensualité »
+   serait plus honnête — « je veux payer 1 000 € par mois pendant 20 ans, ça fait quel
+   taux ? ».
+4. **L'onglet « Hypothèses » du tableur n'a pas suivi le bilan.** Il annonce le capital
+   comme « saisi » alors qu'une marge active peut l'avoir déplacé (`solved.principal` vs
+   `solved.requestedPrincipal`), et il ne porte pas les deux colonnes. À reprendre avec le
+   point 2, dont il est la matière première.
+5. **Numéro de version en pied de page**, pour savoir d'un coup d'œil si l'on regarde la
    dernière version déployée (voir le piège du cache).
-4. **Valeurs par défaut des marges** : actuellement ±0, donc la fonctionnalité est inerte
+6. **Valeurs par défaut des marges** : actuellement ±0, donc la fonctionnalité est inerte
    tant qu'on ne la règle pas. Choix conservateur assumé, à réévaluer à l'usage.
-5. Hors périmètre v1, mentionné pour mémoire : assurance emprunteur, remboursements
+7. Hors périmètre v1, mentionné pour mémoire : assurance emprunteur, remboursements
    anticipés, différé d'amortissement, taux variable, prêts in fine, paliers de mensualité.
 
 ---
 
-## 7. Retours d'interface du 16 août 2026, traités
+## 7. Second tour de retours d'interface, 16 août 2026
 
-Thomas a relu la page déployée et relevé cinq points. **Les cinq sont corrigés** dans le
-répertoire de travail : 161 tests toujours verts, rendu vérifié dans le navigateur en
-1280 px et en 375 px, console vide. Ces modifications ne sont **pas encore commitées** ni
-déployées au moment où ces lignes sont écrites — la page en ligne montre encore l'ancienne
-version.
+Le **premier tour** (cinq points : cumuls affichés à l'euro, bandeau statique, ligne
+d'équation supprimée, aide du champ « taux », libellés de la bascule) est **commité et
+déployé** — tout est dans `7a42bec`, dont le message de commit et les annotations datées du
+SPEC portent le raisonnement. Il n'est plus repris ici.
 
-Les fichiers touchés : `index.html`, `src/ui/app.js`, plus `README.md` et
-`docs/SPEC-echeancier-pret.md` — §3.3 de la spec porte l'annotation datée du retrait de
-l'équation et de l'arrondi d'affichage, conformément à la règle du §3 (une convention qui
-change s'annote, elle ne se réécrit pas en silence). Aucun fichier de `src/core` n'a bougé :
-rien de ce qui suit ne touche au calcul.
+Ce qui suit est le **second tour**, encore dans le répertoire de travail : 161 tests
+toujours verts, rendu vérifié en 1280 px et en 375 px, console vide, journal réseau sans
+aucune requête tierce. Fichiers touchés : `index.html`, `src/ui/app.js`, plus `README.md`
+et `docs/SPEC-echeancier-pret.md`. **Aucun fichier de `src/core` n'a bougé** : rien de ce
+qui suit ne touche au calcul.
 
-### 7.1 Les cumuls s'affichent à l'euro
+### 7.1 Le bloc de résolution devient un bilan
 
-La tuile « Coût total des intérêts » affichait `51 999,96 €` suivi de
-`−0,04 € vs hypothèse (arrondis au centime)`. À l'échelle d'un prêt de 200 000 €, quatre
-centimes ne renseignent personne : c'est du bruit qui coûte une ligne de lecture.
+Demande : « affiche ça sous forme de bilan qui compare les hypothèses (souhaits) et qui dit
+ce qu'on a à la fin (ce qui va être contractualisé) ». Motif donné : c'est ce qui ira dans
+le certificat de dette que l'application doit générer (§6.2).
 
-Ce qui a changé, dans `src/ui/app.js` uniquement :
+Les trois tuiles (mensualité, taux, coût) et les deux notes en prose qui les rattrapaient
+sont remplacées par un **tableau à deux colonnes** — souhaité, contractualisé — avec une
+ligne par terme du prêt : somme prêtée, durée, mensualité, taux annuel nominal, coût total
+des intérêts, total remboursé. Rendu par `renderBalanceSheet` dans `app.js`, styles `.balance`
+dans `index.html`.
 
-- coût total, coût et total versé en euros constants, coût cité dans la note de marge et
-  dans la note d'euros ronds : `formatEuro` → `formatEuroRounded` ;
-- `describeDrift` se tait sous 0,50 € — en dessous, l'écart ne change pas le nombre
-  affiché au-dessus — et exprime l'écart en euros ronds au-delà. En mode « coût choisi »
-  l'écart d'arrondi est toujours sous le seuil, donc la sous-ligne dit désormais
-  « conforme à l'hypothèse saisie » ; en mode euros ronds l'écart reste affiché
-  (`+240 € vs hypothèse (mensualité ronde)` sur les valeurs par défaut).
+Décisions à connaître avant d'y toucher :
 
-Décisions à connaître avant de toucher à ça :
+- **L'écart n'est affiché que s'il se voit.** `describeGap` compare `gapFormat(|écart|)` à
+  `gapFormat(0)` et se tait quand les deux coïncident. C'est la généralisation propre du
+  seuil de 0,50 € du premier tour : les deux colonnes sont déjà arrondies pour l'affichage,
+  donc un écart qui s'imprime « 0 € » contredirait les deux chiffres qu'il commente. Chaque
+  ligne apporte son format, ce qui règle du même coup le cas du taux (en points).
+- **La colonne « souhaité » n'est pas toujours une saisie.** En mode coût, le taux est
+  l'inconnue (`—`, sous-ligne « l'inconnue ») et la mensualité est déduite ; en mode taux,
+  c'est le coût qui est déduit. Chaque case le dit sous elle, plutôt qu'une légende.
+- Les diagnostics du solveur (itérations, résidu, solde final, échéances ajustées) restent
+  sous le bilan : ce sont des preuves, pas des termes du contrat.
+- La note de marge ne répète plus les chiffres du tableau ; elle ne dit que ce qu'aucune
+  colonne ne peut dire (« 2 combinaisons convenaient »). La note d'euros ronds ne subsiste
+  que pour son **échec** — `renderRoundWarning` — puisque le succès est désormais lisible
+  ligne à ligne.
 
-- **la mensualité garde ses centimes** hors mode euros ronds : c'est le montant réellement
-  viré chaque mois, pas un cumul ;
-- l'arrondi est un choix **d'affichage** — calcul, échéancier et exports CSV/XLSX restent
-  au centime ;
-- le pied de page promettait un écart affiché sans condition ; la promesse a été reformulée
-  au lieu d'être laissée fausse (`index.html`, liste des conventions). Si le seuil bouge,
-  cette phrase bouge avec.
+### 7.2 Les euros ronds deviennent la seule convention
 
-### 7.2 Bandeau statique
+« mets tout en euros ronds, la case devient obligatoire ». La case à cocher est retirée,
+`app.js` passe `roundPayment: true` en dur. Le repli bancaire subsiste dans le noyau et
+reste testé ; l'étiquette de mode passe à « mensualité ronde impossible » quand il
+s'applique, et une note l'énonce.
 
-Le bandeau basculait entre « un taux résolu » et « un coût déduit » selon le mode, piloté
-par une constante `MASTHEAD` et une fonction `renderMasthead` dans `app.js`. Les deux ont
-été supprimées, ainsi que les `id` correspondants dans le markup ; `toggleMode` ne fait
-plus que montrer ou cacher le bon champ.
+Conséquence sur la rédaction, qui est le vrai travail ici : **toute phrase qui présentait
+l'arrondi au centime et la dernière échéance ajustée comme le cas normal était fausse.**
+Corrigées dans le pied de page (deux puces désormais : la convention, puis le repli), dans
+le README et dans le SPEC — §4.3 porte l'annotation qui le rétrograde en repli, §4.3 bis
+celle qui dit qu'il n'est plus un mode.
 
-Le texte dit maintenant à quoi sert l'outil, et le nomme pour ce qu'il est : un
-instrument de **prêt entre particuliers** — deux personnes qui s'accordent sur une somme,
-une durée et un coût, et qui ont besoin d'un échéancier tenable. Le `<meta
-name="description">` a été repris dans le même sens. L'étiquette de mode du panneau
-Résolution (`#mode-tag`) reste dynamique : c'est là que l'information de mode a sa place.
+**Quand le repli se déclenche, mesuré et non supposé.** Balayage de 504 combinaisons
+(8 capitaux × 9 durées × 7 taux) : **7 échecs, tous sur le même prêt** — 500 € sur 240 mois,
+à chacun des sept taux essayés. La mensualité idéale y vaut 2,08 € à 5,51 €, et la grille
+des euros entiers est alors trop grossière pour le prêt : 2 € × 240 ne couvrent même pas le
+capital, et les mensualités entières au-dessus font sauter le solde par-dessus zéro. Tous
+les autres cas trouvent une mensualité ronde. Le repli concerne donc les **petits prêts sur
+longue durée**, pas les prêts hors normes — et il reste rare.
 
-### 7.3 Ligne d'équation supprimée
+### 7.3 Bandeau et sous-lignes
 
-`M = P × i ⁄ ( 1 − (1 + i)⁻ⁿ )` et sa substitution numérique ne parlaient pas à
-l'utilisateur, et allaient pourrir à mesure que le calcul évolue — c'était déjà faux
-d'esprit en mode euros ronds, où le taux n'est pas ce qui produit la mensualité mais ce
-qui s'y ajuste. Markup, remplissage de `#substituted` et règles CSS `.equation` /
-`.substituted` sont partis ; `.solved` a perdu son `margin-top` puisqu'il ouvre désormais
-le panneau. `formatNumber` reste importé, il sert encore ailleurs.
+- Titre : « chiffré ligne à ligne » était obscur — la formule voulait dire « une ligne par
+  échéance ». Remplacé par **« chiffré échéance par échéance »**.
+- Chapô : « reste à savoir quel taux cela représente » était faux, puisque « ce que
+  l'emprunt coûtera » **est** le taux ou le cumul d'intérêts. Consigne explicite de Thomas :
+  ne pas rendre la phrase dynamique, mais la rendre **assez générale pour rester vraie quelle
+  que soit l'option retenue**. Elle dit maintenant « un taux, ou un cumul d'intérêts. Cet
+  outil part de l'un ou de l'autre » — ce qui répare du même coup le mode taux, passé sous
+  silence dans la version précédente.
+- `, sans exception` après la mensualité, et la sous-ligne `mensuel 0,20422 %` : supprimés
+  avec les tuiles. Le taux mensuel vaut `taux annuel / 12` et la conversion est en pied de
+  page ; l'afficher ne renseignait personne.
 
-### 7.4 Aide du champ « Taux annuel nominal »
+### 7.4 Ce que ce tour laisse ouvert
 
-Question posée : que voulait dire cette histoire de taux actuariel ?
-
-La réponse, pour mémoire. Le taux mensuel appliqué vaut `taux annuel ⁄ 12` — la convention
-**proportionnelle**, celle des offres de prêt françaises. À 2,45 % nominal, le taux mensuel
-est 0,204 17 % et le taux **équivalent** (dit aussi actuariel), `(1 + i)¹² − 1`, vaut
-2,478 %.
-
-Attention au sens qu'on lui donne : l'équivalent n'est **pas** ce que l'emprunteur paie.
-Sur un prêt amortissable il règle ses intérêts en cash à chaque échéance, rien ne se
-capitalise côté dette, et l'intérêt décroît avec le capital restant dû — sur 10 000 € à
-12 mois il paie 133,20 €, et 2,478 % n'apparaît dans aucun de ses flux. Cet écart est le
-TRI des flux du **prêteur** : celui qui replace chaque mensualité de 844,43 € au même taux
-mensuel termine l'année avec 10 247,77 €, soit 10 000 × 1,024 777. Sa lecture économique
-est donc l'hypothèse de réinvestissement des mensualités ; son utilité pour l'emprunteur
-est de comparer des offres cotées sur des périodicités différentes, pas de mesurer son
-décaissement.
-
-Conclusion retenue : on ne tente pas d'expliquer ça dans l'interface, on simplifie.
-L'aide du champ énonce la règle (÷ 12) et s'arrête là — la phrase sur les douze mois
-composés est retirée, ainsi que la ligne du pied de page qui donnait la formule de
-l'équivalent. Le pied de page garde la seule convention proportionnelle. Le taux
-équivalent reste affiché dans la sous-ligne `#out-rate-sub`, où il est nommé, et dans
-l'onglet des hypothèses du tableur.
-
-### 7.5 Libellés de la bascule
-
-« Je connais le coût » → **« Je choisis le coût de l'emprunt »**, « Je connais le taux » →
-**« Je choisis le taux »** : on ne constate pas une donnée, on décide laquelle des deux on
-fixe. L'`aria-label` du groupe radio suit (« Donnée que vous fixez »).
-
-Le premier libellé passe sur deux lignes dans la colonne de 340 px. Les deux moitiés
-gardent la même largeur ; `.switch label` est devenu un conteneur flex centré pour que le
-libellé long soit centré verticalement au lieu de pendre en haut de sa case. Vérifié à
-375 px : les deux cases font la même hauteur, pas de débordement horizontal.
-
-### 7.6 Ce que ces retours laissent ouvert
-
-- La sous-ligne du coût dit « (arrondis au centime) » quand un écart dépasse le seuil en
-  mode « coût choisi ». Avec des marges de négociation actives, l'écart peut venir de la
-  marge acceptée et non de l'arrondi : la cause affichée serait alors inexacte. Le cas
-  n'est pas atteignable en pratique aujourd'hui (la note de marge dit déjà le coût retenu),
-  mais la ficelle est là.
-- Reste à décider si le bandeau doit dire un mot du cadre juridique (reconnaissance de
-  dette, déclaration au-delà de 5 000 €). Volontairement absent : ce n'est pas un conseil
-  que cet outil est en mesure de donner.
+- Le point §6.4 (l'onglet « Hypothèses » du tableur) est né de ce tour : l'écran distingue
+  désormais montant souhaité et montant retenu, le classeur non.
+- Le libellé de colonne « Contractualisé » engage l'outil sur un terrain juridique où il
+  n'a encore rien à dire (§6.2). C'est assumé tant que le certificat de dette n'existe pas,
+  mais c'est à revoir quand il existera.
 
 ---
 
-## 8. Pour démarrer
+## 8. Troisième tour de retours d'interface, 16 août 2026
+
+Source : un PDF de captures annotées (`feedbacks appli calcul prêt.pdf`), plus une demande
+orale sur la lisibilité du classeur exporté. Onze remarques en tout. Toutes traitées ;
+170 tests verts, rendu vérifié en 1280 px et en 375 px, console vide, journal réseau sans
+aucune requête tierce. Fichiers touchés : `index.html`, `src/ui/app.js`, `src/ui/chart.js`,
+`src/export/xlsx.js`, `src/export/csv.js`, `tests/export.test.js`, plus `README.md` et
+`docs/SPEC-echeancier-pret.md`. **`src/core/` n'a toujours pas bougé** : rien de ce tour ne
+touche au calcul.
+
+### 8.1 Le classeur exporté était juste et illisible
+
+C'est le gros du travail. En-têtes tronqués, colonnes deux fois trop larges pour leurs
+chiffres, aucun repère horizontal sur 240 lignes.
+
+**La cause de l'illisibilité des en-têtes, à ne pas redécouvrir :** les libellés étaient
+déjà déclarés `wrap: true`, mais **un tableur qui n'a pas reçu de hauteur de ligne garde
+la hauteur d'une ligne et rogne tout le reste**. `write-excel-file` accepte une propriété
+`height` par cellule et retient le maximum de la ligne — c'est cette propriété qui
+manquait, pas le repli. Vérifiable dans le XML produit : `<row r="1" ht="51"
+customHeight="1">`.
+
+Le reste de la mise en page est **calculé**, pas choisi à la main (`fitColumns`,
+`headerHeight`, `dress` dans `src/export/xlsx.js`), ce qui la rend juste quel que soit le
+prêt exporté : largeur = max(plus large chiffre imprimé, plus long mot insécable de
+l'en-tête) + 2 ; au-delà de trois lignes d'en-tête la colonne s'élargit d'un caractère à la
+fois plutôt que de faire une tour ; valeurs centrées sur les deux axes ; une ligne sur deux
+teintée. Mesurer un chiffre veut dire mesurer ce qui sera **imprimé** — séparateurs de
+milliers, décimales, signe, `%` — pas la valeur brute : voir `numberWidth`.
+
+Deux pièges rencontrés :
+
+- **Une phrase pleine largeur ne doit pas fixer la largeur de sa colonne.** L'avertissement
+  « ce n'est pas un TAEG » vit en colonne A de l'onglet `Hypothèses` et est censé déborder
+  sur les cellules vides à sa droite. D'où le paramètre `measured` de `sheet()`, qui exclut
+  ces lignes du calcul de largeur.
+- **L'ordre des propriétés dans `dress()` est significatif.** Le fond et le centrage sont
+  posés *avant* l'étalement de la cellule, pour qu'une cellule qui a déclaré son propre
+  alignement (les colonnes de prose, au fer à gauche) l'emporte.
+
+### 8.2 Les diagnostics permanents sautent
+
+« inutile. Vire. ça doit toujours être égal à zéro » (la ligne « Aucune échéance ajustée ·
+solde final 0,00 € ») et « ne laisse pas entendre à l'utilisateur qu'il avait avant le
+choix de cocher la case euro rond ». Ce sont deux fois le même problème : ces mentions sont
+des **invariants**, et « aucune échéance ajustée » se lisait comme le résultat d'une option
+réussie alors que rien n'a jamais été coché. Ligne supprimée, `chip()` avec ; l'étiquette
+de mode passe de « mensualité ronde impossible » à « repli bancaire ».
+
+Corollaire demandé — « si tu ne trouves pas de solutions, dis-le à l'utilisateur » : ce qui
+reste sous le bilan est exclusivement un rapport d'échec, dans une région `aria-live`
+(`#diagnostics`). Les quatre notes existaient déjà, elles étaient noyées.
+
+### 8.3 Les champs se saisissent par pas, et le solveur attend une pause
+
+« l'application rame quand on modifie ce champ » sur la marge du capital, et « interdis de
+mettre des sommes qui ne sont pas des multiples de 100 », « arrondis au plus proche »,
+« pareil pour le taux ». Trois demandes, une seule cause : le solveur repartait à chaque
+frappe, sur des nombres en cours de saisie que personne n'avait voulus.
+
+- **Table `STEPPED` dans `app.js`.** `step` = quantum imposé (100 € sur le capital, 0,05
+  point sur le taux, marges comprises), `buttons` = incréments proposés. Le **coût cumulé
+  garde sa liberté** : ce n'est pas une somme que quelqu'un vire, et 1 587 € est voulu.
+- **Le quantum s'applique dans `readInputs`**, pas seulement à l'affichage : le moteur ne
+  voit jamais un montant interdit. `normalise()` réécrit le champ à sa sortie, ce qui rend
+  la correction visible au lieu de la faire en douce.
+- **Anti-rebond de 280 ms sur la frappe** ; valider un champ ou cliquer un incrément
+  recalcule tout de suite. Le bilan s'estompe (`[data-pending]`) tant qu'une frappe n'a pas
+  été prise en compte, pour qu'une pause ne se lise pas comme un abandon.
+
+### 8.4 Valeurs par défaut, et la vision inflation
+
+- **10 000 € sur 10 ans, coût 1 587 €** (le taux affiche 3,00 %). 200 000 € sur 20 ans
+  décrivait un prêt immobilier bancaire, pas ce que l'outil sert. Les 1 587 € sont bien
+  « l'équivalent en coût cumulé » de 3 % demandé par Thomas : `periodicPayment(10000,
+  0,03/12, 120) × 120 − 10000 = 1 587,29`.
+- **« c'est quoi ces pointillés »** : les courbes déflatées n'étaient nommées nulle part.
+  Entrée de légende ajoutée, avec un fanion réellement pointillé (dégradé CSS répété).
+- **« la vision inflation doit être cochable »** : case `#inflation-on`, active par défaut.
+  Elle commande **d'un bloc** le champ d'inflation, le bloc sous le bilan, la paire en
+  pointillés et **les deux colonnes constantes des exports** — d'où le paramètre
+  `{ constantEuros }` de `buildWorkbook`, `buildCsv`, `exportXlsx`, `exportCsv` et
+  `renderBalanceChart`, et la fonction `scheduleHeaders()` qui remplace l'usage direct de
+  `SCHEDULE_HEADERS` dans le CSV. `SCHEDULE_HEADERS` reste exporté, liste complète.
+
+### 8.5 Ce que ce tour laisse ouvert
+
+- **Le point §6.4 reste entier** : l'onglet `Hypothèses` a gagné la mise en page, pas les
+  deux colonnes « souhaité / contractualisé ». Il annonce toujours le capital comme
+  « saisi » alors qu'une marge active peut l'avoir déplacé.
+- **Le pas du taux (0,05 point) est un choix, pas une donnée.** Thomas a dit « pareil pour
+  le taux » sans chiffrer. 0,05 est ce qui se pratique en négociation ; à confirmer.
+- Le **pas de la durée** n'a pas été touché : elle se saisit toujours librement en années
+  ou en mois.
+
+---
+
+## 9. Pour démarrer
 
 Lire dans l'ordre : ce fichier, puis `README.md` (ce que fait l'outil et pourquoi), puis
 `docs/SPEC-echeancier-pret.md` §4 (conventions de calcul) et §6 (les dix invariants).

@@ -7,13 +7,21 @@ hypothèses connues — capital emprunté, durée, coût cumulé des intérêts 
 l'échéancier mois par mois et l'exporte en tableur.
 
 Elle est écrite pour le **prêt entre particuliers** : deux personnes s'accordent d'abord
-sur une somme, une durée et ce que l'emprunt coûtera, et c'est le taux qui reste à
-déterminer — l'inverse de l'ordre bancaire.
+sur une somme, une durée et ce que l'emprunt coûtera — un taux, ou un cumul d'intérêts —
+et l'outil part de l'un ou de l'autre, l'inverse de l'ordre bancaire.
 
 Le fil directeur est la transparence : aucun chiffre affiché n'est une boîte noire. Le
-nombre d'itérations du solveur, son écart résiduel et le solde final sont affichés à
-l'écran, l'écart entre le coût saisi et le coût effectif est montré plutôt que masqué dès
-qu'il pèse un euro, et toutes les conventions de calcul sont écrites en pied de page.
+résultat se lit en **bilan à deux colonnes, souhaité et contractualisé**, ligne par ligne
+et écart par écart, parce que la mensualité en euros ronds déplace la somme prêtée, le
+taux et le coût par rapport à ce qui a été saisi. Sous le bilan ne subsiste qu'un rapport
+d'échec — repli bancaire, marges introuvables, non-convergence : quand le calcul ne trouve
+pas ce qui était demandé, il le dit, et quand il le trouve, le bilan l'a déjà montré. Les
+conventions de calcul sont écrites en pied de page.
+
+La somme empruntée se saisit **par tranches de 100 €** et le taux **par pas de 0,05
+point** : c'est ainsi qu'un prêt entre particuliers se négocie. Une saisie intermédiaire
+est ramenée au plus proche plutôt que refusée, et chaque champ concerné porte ses boutons
+d'incrément.
 
 Tout le calcul se fait dans le navigateur. Aucun backend, aucune télémétrie, aucune
 requête vers un tiers : polices et bibliothèque d'export sont servies depuis ce dépôt.
@@ -47,17 +55,19 @@ oracles indépendants (voir plus bas).
 ## Conventions de calcul
 
 - Mensualité constante, intérêts calculés sur le capital restant dû au taux mensuel `i`.
-- La mensualité est arrondie au centime une fois pour toutes.
+- **La mensualité est un nombre entier d'euros** (voir la section suivante), identique de
+  la première à la dernière échéance.
 - À chaque échéance : `intérêts = round2(capital_restant_dû × i)`, puis
   `capital_amorti = round2(mensualité − intérêts)`.
-- **La dernière échéance absorbe la dérive** : elle solde exactement le capital et se
-  trouve donc différer des autres de quelques centimes. Elle est signalée comme ajustée.
-  C'est la convention bancaire française — elle ne gêne pas une banque, qui prélève le
+- Repli, quand aucune mensualité ronde ne solde le prêt : la mensualité est arrondie au
+  centime et **la dernière échéance absorbe la dérive** — elle solde exactement le capital
+  et diffère donc des autres de quelques centimes, et elle est signalée comme ajustée.
+  C'est la convention bancaire française ; elle ne gêne pas une banque, qui prélève le
   montant qu'elle veut, mais elle gêne un particulier qui rembourse par virement permanent.
-  D'où le mode ci-dessous.
 - Taux annuel **nominal** = `i × 12` (taux proportionnel, convention des offres de prêt
-  françaises). Taux annuel **équivalent** (actuariel) = `(1 + i)^12 − 1`. Les deux sont
-  affichés, jamais confondus.
+  françaises). C'est le seul taux affiché : le taux **équivalent** (actuariel)
+  `(1 + i)^12 − 1` est le TRI du prêteur sous hypothèse de réinvestissement, pas ce que
+  l'emprunteur décaisse. `annualEquivalentRate` reste dans le noyau, exportée et testée.
 - Périmètre : **hors assurance emprunteur, frais de dossier, garantie et frais annexes**.
   Ce n'est pas un TAEG.
 
@@ -66,9 +76,10 @@ variable, prêts in fine, multi-lignes, paliers de mensualité.
 
 ## Mensualité en euros ronds
 
-Mode **actif par défaut**, pensé pour le prêt entre particuliers remboursé par virement
-permanent : la mensualité est un nombre entier d'euros, **identique sur les `n` échéances
-sans exception**, et le prêt se solde quand même à `0,00 €`.
+**La seule convention de l'outil**, et non plus une case à cocher : un prêt entre
+particuliers se rembourse par virement permanent, et un virement permanent porte un nombre
+entier d'euros. La mensualité est donc entière, **identique sur les `n` échéances sans
+exception**, et le prêt se solde quand même à `0,00 €`.
 
 Ce n'est pas un tour de passe-passe. Le taux est un paramètre **continu**, alors que le
 solde final ne prend que des valeurs en centimes : pour une mensualité entière donnée, les
@@ -86,17 +97,23 @@ En pratique, un écart de 0 à 3 € par rapport à la mensualité idéale suffi
 | 10 000 € / 60 mois | 191,67 € | **192 €** | 5,7138 % | 1 520 € |
 
 La contrepartie est que **le coût total n'est plus celui saisi** : il vaut exactement
-`n × M − P`. Le déplacement de la mensualité, le taux retenu et le nouveau coût sont
-affichés en toutes lettres sous le bloc de résolution.
+`n × M − P`. C'est la raison d'être du bilan à deux colonnes — le déplacement de la
+mensualité, le taux retenu et le nouveau coût se lisent en face de ce qui a été souhaité,
+écart compris.
 
-Décocher la case rend la convention bancaire : mensualité au centime, dernière échéance
-ajustée.
+Quand aucune mensualité ronde ne solde le prêt, même en s'écartant de 24 €, le calcul
+revient à la convention bancaire — mensualité au centime, dernière échéance ajustée — et
+le dit à l'écran. Le noyau garde les deux chemins : `solveLoan` conserve son paramètre
+`roundPayment`, c'est l'interface qui ne propose plus le choix.
 
 ## Pouvoir d'achat
 
-L'inflation est un paramètre, **2 % par défaut**. Les montants nominaux restent
-l'affichage principal — c'est ce qui quitte le compte chaque mois — et une lecture
-supplémentaire les restitue **en euros constants de la date de départ**.
+L'inflation est un paramètre, **2 % par défaut**, sous une case « vision inflation » qui
+commande d'un bloc tout ce qui en découle : le bloc sous le bilan, les courbes en
+pointillés du second graphique et les deux colonnes correspondantes des exports. Les
+montants nominaux restent l'affichage principal — c'est ce qui quitte le compte chaque
+mois — et cette lecture supplémentaire les restitue **en euros constants de la date de
+départ**.
 
 Le point à ne pas rater : chaque versement est déflaté **à sa propre date**, puis sommé.
 Déflater le cumul final en bloc reviendrait à traiter vingt ans de versements comme s'ils
@@ -133,6 +150,19 @@ chiffre **les deux concessions possibles**, séparément — de combien céder s
 marge de capital constante, ou de combien céder sur le capital à marge de taux constante,
 en nommant le montant qui conviendrait. Céder sur l'un ou sur l'autre, ce ne sont pas les
 mêmes discussions avec l'emprunteur.
+
+## Exports
+
+CSV point-virgule (BOM UTF-8, décimales à la virgule) et classeur XLSX à deux onglets —
+`Hypothèses` et `Échéancier` — portant les **valeurs calculées** avec leurs formats de
+nombre, jamais du texte pré-formaté.
+
+La mise en page du classeur est **calculée à partir des données**, pas choisie à la main :
+largeur de chaque colonne prise sur le plus large chiffre qu'elle imprime et sur le plus
+long mot de son en-tête ; hauteur de la ligne d'en-tête prise sur le nombre de lignes que
+les libellés occupent une fois repliés à cette largeur — sans quoi un tableur rogne un
+en-tête replié à sa première ligne ; valeurs centrées sur les deux axes, une ligne sur deux
+teintée, ligne d'en-tête et deux premières colonnes figées.
 
 ## Tests
 

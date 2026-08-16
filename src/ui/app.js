@@ -21,29 +21,70 @@ const MAX_PERIODS = 1200;
 
 const el = (id) => document.getElementById(id);
 
-const state = { solved: null, view: "monthly" };
+const state = { solved: null, inputs: null, view: "monthly", constantEuros: true };
+
+/* ------------------------------------------------------------------------ steps */
+
+/**
+ * The fields that move in steps rather than freely.
+ *
+ * `step` is a quantum the value is held to: a loan between individuals is lent in whole
+ * hundreds and negotiated by the twentieth of a point, so an amount typed between two
+ * steps is not a finer intention, it is a slip. Those fields snap to the nearest step.
+ *
+ * `buttons` are the increments offered next to the field. They exist for speed — a
+ * hand-typed amount runs the solver once per keystroke, on values nobody meant — and are
+ * the reason the coarse increment is offered beside the fine one.
+ */
+const STEPPED = {
+  principal: { step: 100, buttons: [1000, 100], decimals: 0, floor: 100, unit: "€" },
+  "principal-tolerance": { step: 100, buttons: [1000, 100], decimals: 0, floor: 0, unit: "€" },
+  // The cost is a target, not a sum anyone transfers: 1 587 € is a perfectly meant
+  // figure — it is what 3 % comes to — so it gets the buttons without the quantum.
+  cost: { buttons: [1000, 100], decimals: 0, floor: 0, unit: "€" },
+  "cost-tolerance": { buttons: [1000, 100], decimals: 0, floor: 0, unit: "€" },
+  rate: { step: 0.05, buttons: [0.5, 0.05], decimals: 2, floor: 0, unit: "point" },
+  "rate-tolerance": { step: 0.05, buttons: [0.5, 0.05], decimals: 2, floor: 0, unit: "point" }
+};
+
+/** Nearest multiple of `step`, without the binary drift that turns 0,15 into 0,150000002. */
+const snap = (value, step) => Number((Math.round(value / step) * step).toFixed(6));
+
+/** What a stepped field is worth once its quantum and its floor have been applied. */
+function fieldValue(id) {
+  const spec = STEPPED[id];
+  const raw = parseFrenchNumber(el(id).value);
+  if (!spec || !Number.isFinite(raw)) return raw;
+
+  return Math.max(spec.floor, spec.step ? snap(raw, spec.step) : raw);
+}
+
+/** Writes a stepped field back in its own terms — this is where a slip becomes visible. */
+function normalise(id) {
+  const value = fieldValue(id);
+  if (Number.isFinite(value)) el(id).value = formatNumber(value, STEPPED[id].decimals);
+}
 
 /* ------------------------------------------------------------------------ inputs */
 
 function readInputs() {
-  const principal = parseFrenchNumber(el("principal").value);
+  const principal = fieldValue("principal");
   const term = parseFrenchNumber(el("term").value);
   const periods = el("term-unit").value === "years" ? Math.round(term * 12) : Math.round(term);
   const rateIsKnown = el("known-rate").checked;
-  const totalCost = parseFrenchNumber(el("cost").value);
-  const annualRate = parseFrenchNumber(el("rate").value) / 100;
+  const totalCost = fieldValue("cost");
+  const annualRate = fieldValue("rate") / 100;
   const startDate = el("start").value
     ? new Date(`${el("start").value}T12:00:00`)
     : new Date();
-  const roundPayment = el("round-payment").checked;
   const annualInflation = parseFrenchNumber(el("inflation").value) / 100;
 
   // The margin applies to whichever quantity is being aimed at, so it comes from the
   // field that is currently on screen.
-  const principalTolerance = Math.abs(parseFrenchNumber(el("principal-tolerance").value)) || 0;
+  const principalTolerance = Math.abs(fieldValue("principal-tolerance")) || 0;
   const objectiveTolerance = rateIsKnown
-    ? Math.abs(parseFrenchNumber(el("rate-tolerance").value) / 100) || 0
-    : Math.abs(parseFrenchNumber(el("cost-tolerance").value)) || 0;
+    ? Math.abs(fieldValue("rate-tolerance") / 100) || 0
+    : Math.abs(fieldValue("cost-tolerance")) || 0;
 
   return {
     principal,
@@ -52,7 +93,6 @@ function readInputs() {
     totalCost,
     annualRate,
     startDate,
-    roundPayment,
     annualInflation,
     principalTolerance,
     objectiveTolerance
@@ -94,6 +134,7 @@ function validate(inputs) {
 
 function compute() {
   const inputs = readInputs();
+  state.inputs = inputs;
 
   el("term-hint").textContent = Number.isFinite(inputs.periods)
     ? `${inputs.periods} mensualités`
@@ -117,6 +158,8 @@ function compute() {
     ]) {
       el(id).hidden = true;
     }
+    el("balance-body").replaceChildren();
+    el("balance-caption").textContent = "";
     renderTable({ tbody: el("tbody"), schedule: [], view: state.view });
     renderCharts([], 0, 0);
     return;
@@ -128,7 +171,10 @@ function compute() {
     principal: inputs.principal,
     periods: inputs.periods,
     startDate: inputs.startDate,
-    roundPayment: inputs.roundPayment,
+    // Round instalments are the whole point of the tool, not an option: a loan between
+    // individuals is repaid by standing order, and a standing order is a whole number of
+    // euros. What the engine adjusts to honour it is the rate.
+    roundPayment: true,
     annualInflation: inputs.annualInflation,
     principalTolerance: inputs.principalTolerance,
     objectiveTolerance: inputs.objectiveTolerance,
@@ -150,7 +196,8 @@ function renderCharts(schedule, principal, annualInflation) {
     probe: el("probe-balance"),
     schedule,
     principal,
-    annualInflation
+    annualInflation,
+    constantEuros: state.constantEuros
   });
 }
 
@@ -158,58 +205,162 @@ function renderCharts(schedule, principal, annualInflation) {
 
 function renderReadout() {
   const solved = state.solved;
-  const { principal, periods, rate, payment, rateIsKnown } = solved;
   const round = solved.roundPayment;
 
+  // "mensualité ronde impossible" read as a setting that had failed, when nothing was ever
+  // switched on: whole-euro instalments are what this tool computes. What the tag names
+  // when they are unreachable is the convention the calculation fell back to.
   el("mode-tag").textContent = round.applied
-    ? "mensualité ronde"
-    : round.requested
-      ? "euros ronds impossible"
-      : rateIsKnown
-        ? "coût déduit"
-        : "taux résolu";
+    ? solved.rateIsKnown
+      ? "taux fixé"
+      : "coût fixé"
+    : "repli bancaire";
 
   renderRateWarning(solved);
   renderToleranceNote(solved);
-  renderRoundNote(solved);
+  renderRoundWarning(solved);
   renderConstantEuros(solved);
+  renderBalanceSheet(solved);
 
-  // A round instalment is shown without its two zero cents: the point is that it is round.
-  const showPayment = round.applied ? formatEuroRounded : formatEuro;
-  el("out-payment").textContent = showPayment(payment);
-  el("out-payment-sub").textContent = round.applied
-    ? `${periods} × ${showPayment(payment)}, sans exception`
-    : `${periods} × ${formatEuro(payment)} = ${formatEuroRounded(payment * periods)}`;
-
-  el("out-rate").textContent = formatPercent(solved.annualNominalRate, 3);
-  el("out-rate-sub").textContent = `mensuel ${formatPercent(rate, 5)}`;
-
-  el("out-cost").textContent = formatEuroRounded(solved.effectiveCost);
-  el("out-cost-sub").textContent = round.applied
-    ? describeDrift(solved.costDrift, "mensualité ronde")
-    : rateIsKnown
-      ? `${formatNumber((solved.effectiveCost / principal) * 100, 1)} % du capital emprunté`
-      : describeDrift(solved.costDrift, "arrondis au centime");
-
-  el("convergence").replaceChildren(
-    ...(round.applied
-      ? [
-          chip("Taux choisi pour que la mensualité ronde solde exactement"),
-          chip("aucune échéance ajustée"),
-          chip("solde final 0,00 €")
-        ]
-      : rateIsKnown
-        ? [chip("Taux donné, coût déduit"), chip("arrondi au centime sur chaque échéance")]
-        : [
-            chip("Résolu par encadrement puis dichotomie"),
-            chip(`${solved.iterations} itérations`),
-            chip(`écart résiduel ${Math.abs(solved.residual).toExponential(1)} €`)
-          ])
-  );
-
-  const warning = el("convergence-warning");
-  warning.hidden = solved.converged;
+  // The solver's own diagnostics — iteration count, residual, "no adjusted instalment",
+  // "final balance 0,00 €" — used to be printed under the balance sheet on every run.
+  // They are invariants, not findings: the schedule always settles at zero and no
+  // instalment is ever adjusted, so a line saying so told the reader nothing they could
+  // act on. Only a failure is worth their attention, and each failure has its own note.
+  el("convergence-warning").hidden = solved.converged;
 }
+
+/**
+ * The balance sheet: the wishes typed into the form on one side, the loan that will
+ * actually be signed on the other.
+ *
+ * Both columns are needed, because the round instalment moves the loan. The rate is the
+ * quantity that gives way so that whole-euro instalments settle the debt to the cent,
+ * and the cost follows the rate. Printing only the outcome would quietly rewrite what
+ * was asked for; printing only the wish would describe a loan nobody is going to sign.
+ * This is the summary a debt acknowledgement is drawn from, so every line is a term of
+ * the contract — not a solver diagnostic, those stay in the line underneath.
+ */
+function renderBalanceSheet(solved) {
+  const inputs = state.inputs;
+  const round = solved.roundPayment;
+  const rateIsKnown = solved.rateIsKnown;
+  const first = solved.schedule[0];
+  const last = solved.schedule[solved.schedule.length - 1];
+
+  const wishedTotal = solved.requestedPrincipal + solved.targetCost;
+  const finalTotal = solved.principal + solved.effectiveCost;
+
+  const rows = [
+    {
+      term: "Somme prêtée",
+      wish: formatEuroRounded(solved.requestedPrincipal),
+      wishSub: margin(inputs.principalTolerance, formatEuroRounded),
+      final: formatEuroRounded(solved.principal),
+      gap: solved.principal - solved.requestedPrincipal,
+      gapFormat: formatEuroRounded
+    },
+    {
+      term: "Durée",
+      wish: `${solved.periods} mois`,
+      final: `${solved.periods} mois`,
+      finalSub: `${formatMonth(first.date)} → ${formatMonth(last.date)}`
+    },
+    {
+      term: "Mensualité",
+      hero: true,
+      wish: formatEuro(round.idealPayment),
+      wishSub: rateIsKnown ? "déduite du taux" : "déduite du coût",
+      final: round.applied ? formatEuroRounded(solved.payment) : formatEuro(solved.payment),
+      finalSub: round.applied ? null : "dernière échéance ajustée",
+      gap: solved.payment - round.idealPayment,
+      gapFormat: formatEuro
+    },
+    {
+      term: "Taux annuel nominal",
+      wish: rateIsKnown ? formatPercent(inputs.annualRate, 3) : "—",
+      wishSub: rateIsKnown
+        ? margin(inputs.objectiveTolerance, (value) => formatPercent(value, 3))
+        : "l'inconnue",
+      final: formatPercent(solved.annualNominalRate, 4),
+      gap: rateIsKnown ? solved.annualNominalRate - inputs.annualRate : NaN,
+      gapFormat: (value) => `${formatNumber(value * 100, 3)} pt`
+    },
+    {
+      term: "Coût total des intérêts",
+      wish: formatEuroRounded(solved.targetCost),
+      wishSub: rateIsKnown
+        ? "déduit du taux"
+        : margin(inputs.objectiveTolerance, formatEuroRounded),
+      final: formatEuroRounded(solved.effectiveCost),
+      gap: solved.costDrift,
+      gapFormat: formatEuroRounded
+    },
+    {
+      term: "Total remboursé",
+      wish: formatEuroRounded(wishedTotal),
+      final: formatEuroRounded(finalTotal),
+      gap: finalTotal - wishedTotal,
+      gapFormat: formatEuroRounded
+    }
+  ];
+
+  el("balance-body").replaceChildren(...rows.map(balanceRow));
+
+  el("balance-caption").textContent = round.applied
+    ? `Le taux est ce qui s'ajuste : il est choisi pour que ${solved.periods} virements ` +
+      `de ${formatEuroRounded(solved.payment)}, tous identiques, soldent le prêt au centime.`
+    : "Aucune mensualité ronde ne convenait ; la colonne de droite suit donc la convention" +
+      " bancaire.";
+}
+
+function balanceRow(row) {
+  const tr = document.createElement("tr");
+  if (row.hero) tr.className = "hero";
+
+  const term = document.createElement("th");
+  term.scope = "row";
+  term.className = "term";
+  term.textContent = row.term;
+
+  tr.append(
+    term,
+    cell("wish", row.wish, row.wishSub),
+    cell("final", row.final, row.finalSub, describeGap(row))
+  );
+  return tr;
+}
+
+function cell(className, value, sub, gap) {
+  const td = document.createElement("td");
+  td.className = className;
+  td.append(text(value));
+  if (sub) td.append(subLine(sub));
+  if (gap) td.append(subLine(gap, "gap"));
+  return td;
+}
+
+function subLine(value, extra) {
+  const span = document.createElement("span");
+  span.className = extra ? `sub ${extra}` : "sub";
+  span.textContent = value;
+  return span;
+}
+
+/**
+ * A gap worth stating is one the reader can see. Both columns are already rounded for
+ * display, so a difference that prints as zero — four cents on a cumulative total, a
+ * millionth of a point on a rate — would contradict the two figures it sits under.
+ * Anything that does print is stated, signed, and never softened.
+ */
+function describeGap({ wish, final, gap, gapFormat }) {
+  if (!Number.isFinite(gap) || wish === final) return null;
+  if (gapFormat(Math.abs(gap)) === gapFormat(0)) return null;
+  return `${gap > 0 ? "+" : ""}${gapFormat(gap)}`;
+}
+
+/** A negotiating margin, restated under the figure it qualifies. */
+const margin = (tolerance, format) => (tolerance > 0 ? `marge ± ${format(tolerance)}` : null);
 
 /**
  * The negotiating margins, and what came of them.
@@ -232,25 +383,17 @@ function renderToleranceNote(solved) {
   note.hidden = false;
   const rateMode = solved.rateIsKnown;
 
+  // The figures themselves are in the balance sheet above; what the note adds is how much
+  // room the margins actually left, which no column can show.
   if (result.found) {
     note.classList.add("info");
-    const movedPrincipal = solved.principal !== solved.requestedPrincipal;
     note.replaceChildren(
-      text("Dans vos marges : "),
-      strong(`${formatEuroRounded(solved.principal)} prêtés`),
-      text(
-        movedPrincipal
-          ? ` (au lieu de ${formatEuroRounded(solved.requestedPrincipal)}), `
-          : " comme demandé, "
-      ),
-      strong(`${solved.periods} × ${formatEuroRounded(solved.payment)}`),
-      text(", taux "),
-      strong(formatPercent(solved.annualNominalRate, 4)),
-      text(`, coût ${formatEuroRounded(solved.effectiveCost)}. `),
+      strong("Trouvé dans vos marges."),
       text(
         result.alternatives > 1
-          ? `${result.alternatives} combinaisons convenaient ; voici la plus proche de vos intentions.`
-          : "C'était la seule combinaison possible."
+          ? ` ${result.alternatives} combinaisons convenaient ; le bilan retient la plus` +
+            " proche de vos intentions."
+          : " C'était la seule combinaison possible."
       )
     );
     return;
@@ -321,7 +464,7 @@ function renderToleranceNote(solved) {
  */
 function renderConstantEuros(solved) {
   const block = el("constant-euros");
-  const active = Math.abs(solved.annualInflation) > 1e-9;
+  const active = state.constantEuros && Math.abs(solved.annualInflation) > 1e-9;
 
   block.hidden = !active;
   if (!active) return;
@@ -356,69 +499,29 @@ function renderRateWarning(solved) {
 }
 
 /**
- * Says what the round-instalment constraint cost, in plain words. Snapping the
- * instalment to the euro moves the rate and therefore the total cost, and that is
- * precisely the sort of thing this tool refuses to do silently.
+ * The round instalment is not an option any more, so its success needs no commentary —
+ * the balance sheet shows what it cost, line by line. Only its failure does: falling back
+ * on the banking convention changes what the borrower signs, and that is the sort of
+ * thing this tool refuses to do silently.
  */
-function renderRoundNote(solved) {
+function renderRoundWarning(solved) {
   const note = el("round-note");
-  const round = solved.roundPayment;
+  const applied = solved.roundPayment.applied;
 
-  if (!round.requested) {
-    note.hidden = true;
-    return;
-  }
+  note.hidden = applied;
+  if (applied) return;
 
-  note.hidden = false;
-
-  if (!round.applied) {
-    note.classList.remove("info");
-    note.textContent =
-      "Aucune mensualité en euros ronds ne solde exactement ce prêt, même en s'écartant " +
-      "de 24 €. La dernière échéance est donc ajustée, comme le ferait une banque.";
-    return;
-  }
-
-  note.classList.add("info");
-  note.replaceChildren(
-    text("Mensualité arrondie de "),
-    strong(formatEuro(round.idealPayment)),
-    text(" à "),
-    strong(formatEuroRounded(solved.payment)),
-    text(`, et taux porté à ${formatPercent(solved.annualNominalRate, 4)} pour que les `),
-    strong(`${solved.periods} échéances identiques`),
-    text(" soldent le prêt au centime. "),
-    text(
-      round.offset === 0
-        ? "L'arrondi tombait juste : le coût est celui que vous aviez demandé."
-        : `Le coût passe de ${formatEuroRounded(solved.targetCost)} à ` +
-          `${formatEuroRounded(solved.effectiveCost)}, soit ` +
-          `${solved.costDrift > 0 ? "+" : ""}${formatEuroRounded(solved.costDrift)}.`
-    )
-  );
+  note.classList.remove("info");
+  note.textContent =
+    "Aucune mensualité en euros ronds ne solde exactement ce prêt, même en s'écartant " +
+    "de 24 €. La dernière échéance est donc ajustée de quelques centimes, comme le ferait " +
+    "une banque.";
 }
-
-/**
- * Cumulative amounts are displayed to the euro, so a drift of a few cents describes a gap
- * the reader cannot even see on the figure above — it reads as noise, not as information.
- * Below half a euro the rounded figure is the one that was asked for, and the drift is
- * reported as conform; anything larger is still stated, never hidden.
- */
-const describeDrift = (drift, cause) =>
-  Math.abs(drift) < 0.5
-    ? "conforme à l'hypothèse saisie"
-    : `${drift > 0 ? "+" : ""}${formatEuroRounded(drift)} vs hypothèse (${cause})`;
 
 const text = (value) => document.createTextNode(value);
 
 function strong(value) {
   const node = document.createElement("b");
-  node.textContent = value;
-  return node;
-}
-
-function chip(value) {
-  const node = document.createElement("span");
   node.textContent = value;
   return node;
 }
@@ -441,6 +544,9 @@ function setExportsEnabled(enabled) {
   el("export-xlsx").disabled = !enabled;
 }
 
+/** Exports carry the same columns as the screen, inflation view included or not. */
+const exportOptions = () => ({ constantEuros: state.constantEuros });
+
 async function downloadXlsx() {
   const button = el("export-xlsx");
   const label = button.textContent;
@@ -448,7 +554,7 @@ async function downloadXlsx() {
   try {
     button.disabled = true;
     button.textContent = "Génération…";
-    await exportXlsx(state.solved, "echeancier-pret.xlsx");
+    await exportXlsx(state.solved, "echeancier-pret.xlsx", exportOptions());
   } catch (error) {
     const box = el("error");
     box.hidden = false;
@@ -459,28 +565,112 @@ async function downloadXlsx() {
   }
 }
 
+/* -------------------------------------------------------------------- scheduling */
+
+/**
+ * The solver is not cheap: with a margin set it walks every whole-hundred principal in
+ * the band and, for each, every whole-euro instalment that could land inside it, running
+ * a bisection per candidate. Running that on each keystroke made the page stutter while a
+ * three-digit margin was being typed — and every run but the last was on a number nobody
+ * meant. Typing now waits for a pause; committing a field, or stepping it, does not.
+ */
+const TYPING_PAUSE = 280;
+
+let pending = null;
+
+function computeNow() {
+  clearTimeout(pending);
+  pending = null;
+  el("readout").removeAttribute("data-pending");
+  compute();
+}
+
+function scheduleCompute() {
+  clearTimeout(pending);
+  // Says the keystroke was seen while its consequences are still being worked out, so a
+  // pause of a quarter of a second does not read as the page having ignored it.
+  el("readout").setAttribute("data-pending", "");
+  pending = setTimeout(computeNow, TYPING_PAUSE);
+}
+
 /* ------------------------------------------------------------------------ startup */
+
+/** Builds the − / + row under a stepped field, coarse increment outermost. */
+function attachStepper(id, spec) {
+  const input = el(id);
+  const row = document.createElement("div");
+  row.className = "stepper";
+
+  const deltas = [
+    ...spec.buttons.map((value) => -value),
+    ...[...spec.buttons].reverse()
+  ];
+
+  for (const delta of deltas) {
+    const button = document.createElement("button");
+    const sign = delta < 0 ? "−" : "+";
+    const size = formatNumber(Math.abs(delta), spec.decimals);
+
+    button.type = "button";
+    button.textContent = `${sign}${size}`;
+    button.setAttribute(
+      "aria-label",
+      `${delta < 0 ? "Diminuer" : "Augmenter"} de ${size} ${spec.unit}`
+    );
+    button.addEventListener("click", () => {
+      const current = fieldValue(id);
+      const next = Number.isFinite(current) ? current + delta : delta;
+      input.value = formatNumber(Math.max(spec.floor, next), spec.decimals);
+      computeNow();
+    });
+
+    row.appendChild(button);
+  }
+
+  input.closest(".control, .tolerance").after(row);
+}
 
 function init() {
   const firstDueDate = addMonths(new Date(), 1);
   firstDueDate.setDate(5);
   el("start").value = toIsoDate(firstDueDate);
 
+  for (const [id, spec] of Object.entries(STEPPED)) attachStepper(id, spec);
+
   const form = el("form");
 
   form.addEventListener("input", (event) => {
-    if (event.target.name === "known") toggleMode();
-    compute();
+    if (event.target.name === "known") {
+      toggleMode();
+      computeNow();
+      return;
+    }
+    if (event.target.id === "inflation-on") {
+      toggleInflation();
+      computeNow();
+      return;
+    }
+    scheduleCompute();
   });
-  form.addEventListener("change", compute);
+
+  // `change` fires when a field is left after an edit: the moment to hold a slipped
+  // amount to its step, and to show the reader the value the calculation actually used.
+  form.addEventListener("change", (event) => {
+    if (STEPPED[event.target.id]) normalise(event.target.id);
+    computeNow();
+  });
+
   form.addEventListener("submit", (event) => event.preventDefault());
 
   el("view-monthly").addEventListener("click", () => setView("monthly"));
   el("view-yearly").addEventListener("click", () => setView("yearly"));
-  el("export-csv").addEventListener("click", () => exportCsv(state.solved));
+  el("export-csv").addEventListener("click", () =>
+    exportCsv(state.solved, "echeancier-pret.csv", exportOptions())
+  );
   el("export-xlsx").addEventListener("click", downloadXlsx);
 
   toggleMode();
+  toggleInflation();
   compute();
 }
 
@@ -488,6 +678,17 @@ function toggleMode() {
   const rateIsKnown = el("known-rate").checked;
   el("field-cost").hidden = rateIsKnown;
   el("field-rate").hidden = !rateIsKnown;
+}
+
+/**
+ * The constant-euro reading, on or off as a whole: the block under the balance sheet, the
+ * dashed pair on the second chart and the two export columns are one and the same answer
+ * to one and the same question, so they are switched together rather than one by one.
+ */
+function toggleInflation() {
+  state.constantEuros = el("inflation-on").checked;
+  el("inflation-controls").hidden = !state.constantEuros;
+  el("legend-constant").hidden = !state.constantEuros;
 }
 
 init();

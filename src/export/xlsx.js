@@ -7,6 +7,10 @@
  *
  * The writer is injected rather than imported so this module can be exercised outside a
  * browser; in the page it resolves to the vendored write-excel-file UMD bundle.
+ *
+ * Layout is computed from the data rather than guessed (see fitColumns / headerHeight):
+ * hand-picked widths left half a column of blank either side of every figure, and a
+ * wrapped header with no row height set is clipped to one line by the spreadsheet.
  */
 
 const MONEY = "#,##0.00";
@@ -17,6 +21,7 @@ const DATE = "dd/mm/yyyy";
 const SHEET_ASSUMPTIONS = "Hypothèses";
 const SHEET_SCHEDULE = "Échéancier";
 
+/** Every column of the schedule, constant-euro readings included. */
 export const SCHEDULE_HEADERS = [
   "N°",
   "Échéance",
@@ -30,36 +35,217 @@ export const SCHEDULE_HEADERS = [
   "Intérêts cumulés (€ constants)"
 ];
 
-/** Same petrol ink as the page, so the workbook reads as part of the same tool. */
-const INK = "#17262B";
-const RULE = "#DCE5E4";
+/** How many trailing columns belong to the constant-euro reading. */
+const CONSTANT_COLUMNS = 2;
 
 /**
- * Header cells: reversed out of the dark ink, and aligned the way their column is, so
- * the label sits over its own figures rather than drifting away from them.
+ * The columns to write. The constant-euro pair is dropped when the reader has turned the
+ * inflation view off on screen: exporting a reading they chose not to look at would put
+ * two columns of purchasing power next to figures they asked to see in current euros.
+ *
+ * @param {{constantEuros?: boolean}} [options]
+ * @returns {Array<string>}
  */
-const header = (value, align = "right") => ({
+export function scheduleHeaders({ constantEuros = true } = {}) {
+  return constantEuros
+    ? SCHEDULE_HEADERS
+    : SCHEDULE_HEADERS.slice(0, SCHEDULE_HEADERS.length - CONSTANT_COLUMNS);
+}
+
+/** Same petrol ink as the page, so the workbook reads as part of the same tool. */
+const INK = "#17262B";
+/** Every other row, faintly, so the eye keeps its line across ten columns. */
+const BAND = "#F1F5F4";
+
+/** Excel column widths are in characters; a value wants a little air on either side. */
+const PADDING = 2;
+/** Rows are in points: one wrapped line of the default 11 pt font, plus its leading. */
+const LINE_HEIGHT = 15;
+/** Prose columns stop widening here rather than push the figures off the screen. */
+const MAX_WIDTH = 56;
+/**
+ * A header may stack this many lines. Beyond it the column is widened a character at a
+ * time instead: the figures are short, so a header left to wrap freely would tower over
+ * its own column — five words down a ten-character column costs far more vertical room
+ * than the one or two characters of white that buy a line back.
+ */
+const MAX_HEADER_LINES = 3;
+
+/**
+ * Header cells: reversed out of the dark ink, wrapped, and centred over their column.
+ * The row height that makes the wrap visible is set by headerHeight().
+ */
+const header = (value) => ({
   value,
   type: String,
   fontWeight: "bold",
   color: "#FFFFFF",
   backgroundColor: INK,
-  align,
+  align: "center",
   alignVertical: "center",
   wrap: true
 });
 
-const money = (value) => ({ value, type: Number, format: MONEY, align: "right" });
-const label = (value) => ({ value, type: String });
-const note = (value) => ({ value, type: String, color: "#5F757C" });
+const money = (value) => ({ value, type: Number, format: MONEY });
+const label = (value) => ({ value, type: String, align: "left" });
+const note = (value) => ({ value, type: String, color: "#5F757C", align: "left" });
+
+/* ------------------------------------------------------------------------ layout */
+
+/** A wrapped header can be no narrower than its longest unbreakable word. */
+const longestWord = (text) =>
+  String(text ?? "")
+    .split(/\s+/)
+    .reduce((most, word) => Math.max(most, word.length), 0);
+
+/** How many lines `text` takes once wrapped at `width` characters. */
+function wrappedLines(text, width) {
+  const words = String(text ?? "").split(/\s+/).filter(Boolean);
+  if (!words.length) return 1;
+
+  let lines = 1;
+  let used = words[0].length;
+
+  for (const word of words.slice(1)) {
+    if (used + 1 + word.length <= width) {
+      used += 1 + word.length;
+    } else {
+      lines++;
+      used = word.length;
+    }
+  }
+  return lines;
+}
+
+const integerDigits = (value) =>
+  Math.max(1, Math.floor(Math.log10(Math.abs(value) || 1)) + 1);
+
+/**
+ * Width of a number once the spreadsheet has printed it: sign, thousands separators,
+ * decimal separator and decimals all take room the raw value does not show.
+ */
+function numberWidth(value, format) {
+  const percent = format === RATE_MONTHLY || format === RATE_ANNUAL;
+  const decimals = format === RATE_MONTHLY ? 5 : format === RATE_ANNUAL ? 3 : format === MONEY ? 2 : 0;
+  const printed = percent ? value * 100 : value;
+  const digits = integerDigits(printed);
+
+  return (
+    (printed < 0 ? 1 : 0) +
+    digits +
+    (format === MONEY ? Math.floor((digits - 1) / 3) : 0) +
+    (decimals ? decimals + 1 : 0) +
+    (percent ? 1 : 0)
+  );
+}
+
+/** Width of one cell's printed content, in characters. */
+function printedWidth(cell) {
+  if (!cell || cell.value == null) return 0;
+  if (cell.type === Date) return 10; // dd/mm/yyyy
+  if (cell.type === Number) return numberWidth(cell.value, cell.format);
+  return String(cell.value).length;
+}
+
+/**
+ * Column widths taken from what is actually in the column: the widest figure below, and
+ * the longest word of the header above, since the header wraps and no longer dictates the
+ * width on its own. Prose columns are capped, or a sixty-character note would set the
+ * width of the whole sheet.
+ *
+ * @param {Array<Array<object>>} rows header row first
+ * @returns {Array<number>}
+ */
+function fitColumns(rows) {
+  const count = rows.reduce((most, row) => Math.max(most, row.length), 0);
+  const widths = [];
+
+  for (let column = 0; column < count; column++) {
+    let widest = 0;
+
+    rows.forEach((row, index) => {
+      const cell = row[column];
+      const width = index === 0 ? longestWord(cell && cell.value) : printedWidth(cell);
+      if (width > widest) widest = width;
+    });
+
+    let width = Math.min(widest + PADDING, MAX_WIDTH);
+
+    const label = rows[0][column] && rows[0][column].value;
+    while (width < MAX_WIDTH && wrappedLines(label, width - PADDING) > MAX_HEADER_LINES) {
+      width++;
+    }
+
+    widths.push(width);
+  }
+
+  return widths;
+}
+
+/**
+ * Height the header row needs for its longest wrapped label. Without it the spreadsheet
+ * keeps the default one-line height and clips everything below the first line, which is
+ * exactly what makes a wrapped header unreadable.
+ */
+function headerHeight(headerRow, widths) {
+  const lines = headerRow.reduce(
+    (most, cell, column) =>
+      Math.max(most, wrappedLines(cell.value, widths[column] - PADDING)),
+    1
+  );
+  return lines * LINE_HEIGHT + 6;
+}
+
+/**
+ * Applies the reading aids that are pure presentation: values centred on both axes, one
+ * row in two tinted. Cells keep any alignment they set for themselves, which is how the
+ * prose columns of the Hypothèses sheet stay left-aligned.
+ */
+function dress(dataRows) {
+  return dataRows.map((row, index) =>
+    row.map((cell) =>
+      cell == null
+        ? cell
+        : {
+            align: "center",
+            alignVertical: "center",
+            ...(index % 2 ? { backgroundColor: BAND } : {}),
+            ...cell
+          }
+    )
+  );
+}
+
+/**
+ * Assembles a sheet: header row measured, data rows dressed, columns fitted.
+ *
+ * `measured` exists for rows that must not set the width of their column — a full-width
+ * sentence sitting in column A is meant to spill across the empty cells beside it, not to
+ * widen the column to its own length.
+ */
+function sheet(name, headerRow, dataRows, { measured = dataRows, ...extra } = {}) {
+  const widths = fitColumns([headerRow, ...measured]);
+  const height = headerHeight(headerRow, widths);
+
+  return {
+    sheet: name,
+    data: [headerRow.map((cell) => ({ ...cell, height })), ...dress(dataRows)],
+    columns: widths.map((width) => ({ width })),
+    stickyRowsCount: 1,
+    ...extra
+  };
+}
+
+/* ------------------------------------------------------------------------ workbook */
 
 /**
  * Builds the two sheets of the workbook.
  *
  * @param {object} solved result of solveLoan()
- * @returns {{sheets: Array, columns: Array}} write-excel-file payload
+ * @param {{constantEuros?: boolean}} [options] whether to carry the constant-euro columns
+ * @returns {Array} write-excel-file payload, one object per sheet
  */
-export function buildWorkbook(solved) {
+export function buildWorkbook(solved, { constantEuros = true } = {}) {
   const {
     principal,
     periods,
@@ -75,7 +261,6 @@ export function buildWorkbook(solved) {
   } = solved;
 
   const assumptions = [
-    [header("Hypothèse", "left"), header("Valeur", "left"), header("Note", "left")],
     [
       label("Capital emprunté (€)"),
       money(principal),
@@ -89,39 +274,27 @@ export function buildWorkbook(solved) {
     [
       label("Taux mensuel"),
       { value: rate, type: Number, format: RATE_MONTHLY },
-      {
-        value: solved.roundPayment.applied
+      note(
+        solved.roundPayment.applied
           ? "choisi pour que la mensualité ronde solde exactement"
           : rateIsKnown
             ? "taux annuel nominal / 12"
-            : `résolu par dichotomie, ${iterations} itérations`,
-        type: String
-      }
+            : `résolu par dichotomie, ${iterations} itérations`
+      )
     ],
     [
       label("Mensualité (€)"),
       money(payment),
-      {
-        value: solved.roundPayment.applied
+      note(
+        solved.roundPayment.applied
           ? "euros ronds, identique sur les " + periods + " échéances"
-          : "arrondie au centime, dernière échéance ajustée",
-        type: String
-      }
+          : "arrondie au centime, dernière échéance ajustée"
+      )
     ],
     [
       label("Taux annuel nominal"),
       { value: annualNominalRate, type: Number, format: RATE_ANNUAL },
       note("taux mensuel × 12 (taux proportionnel)")
-    ],
-    [
-      label("Taux d'inflation annuel"),
-      { value: solved.annualInflation, type: Number, format: RATE_ANNUAL, align: "right" },
-      note("saisi ; sert à exprimer les montants en euros constants")
-    ],
-    [
-      label("Taux annuel réel"),
-      { value: solved.realAnnualRate, type: Number, format: RATE_ANNUAL, align: "right" },
-      note("(1 + taux nominal) / (1 + inflation) − 1, formule de Fisher")
     ],
     [
       label("Coût total des intérêts (€)"),
@@ -136,83 +309,79 @@ export function buildWorkbook(solved) {
     [
       label("Écart d'arrondi (€)"),
       money(costDrift),
-      {
-        value: solved.roundPayment.applied
+      note(
+        solved.roundPayment.applied
           ? "coût effectif − hypothèse, dû à la mensualité en euros ronds"
-          : "coût effectif − hypothèse, dû aux arrondis au centime",
-        type: String
-      }
+          : "coût effectif − hypothèse, dû aux arrondis au centime"
+      )
     ],
-    [
-      label("Coût des intérêts (€ constants)"),
-      money(solved.constantCost),
-      note("chaque échéance déflatée à sa propre date, puis sommée")
-    ],
+    ...(constantEuros
+      ? [
+          [
+            label("Taux d'inflation annuel"),
+            { value: solved.annualInflation, type: Number, format: RATE_ANNUAL },
+            note("saisi ; sert à exprimer les montants en euros constants")
+          ],
+          [
+            label("Taux annuel réel"),
+            { value: solved.realAnnualRate, type: Number, format: RATE_ANNUAL },
+            note("(1 + taux nominal) / (1 + inflation) − 1, formule de Fisher")
+          ],
+          [
+            label("Coût des intérêts (€ constants)"),
+            money(solved.constantCost),
+            note("chaque échéance déflatée à sa propre date, puis sommée")
+          ]
+        ]
+      : []),
     [
       label("Première échéance"),
       schedule.length
         ? { value: schedule[0].date, type: Date, format: DATE }
         : { value: null, type: String },
       note("saisie")
-    ],
-    [],
-    [
-      {
-        value:
-          "Hors assurance emprunteur, frais de dossier, garantie et frais annexes : ce n'est pas un TAEG.",
-        type: String
-      }
     ]
   ];
 
-  // The first two columns identify the row rather than measure it, so they are aligned
-  // left and are the two that stay put when the sheet is scrolled sideways.
-  const scheduleRows = [
-    SCHEDULE_HEADERS.map((text, column) => header(text, column < 2 ? "left" : "right")),
-    ...schedule.map((row) => [
-      { value: row.number, type: Number, align: "left" },
-      { value: row.date, type: Date, format: DATE, align: "left" },
+  const disclaimer = [
+    label(
+      "Hors assurance emprunteur, frais de dossier, garantie et frais annexes : ce n'est pas un TAEG."
+    )
+  ];
+
+  const headers = scheduleHeaders({ constantEuros });
+
+  const scheduleRows = schedule.map((row) =>
+    [
+      { value: row.number, type: Number },
+      { value: row.date, type: Date, format: DATE },
       money(row.instalment),
       money(row.interest),
       money(row.capital),
       money(row.balance),
       money(row.cumulativeInterest),
       money(row.cumulativeCapital),
-      money(row.constantBalance),
-      money(row.constantCumulativeInterest)
-    ])
-  ];
+      ...(constantEuros
+        ? [money(row.constantBalance), money(row.constantCumulativeInterest)]
+        : [])
+    ]
+  );
 
   // write-excel-file takes one object per sheet, each carrying its own column widths and
   // its own frozen panes.
   return [
-    {
-      sheet: SHEET_ASSUMPTIONS,
-      data: assumptions,
-      columns: [{ width: 34 }, { width: 20 }, { width: 52 }],
-      stickyRowsCount: 1
-    },
-    {
-      sheet: SHEET_SCHEDULE,
-      data: scheduleRows,
+    sheet(
+      SHEET_ASSUMPTIONS,
+      [header("Hypothèse"), header("Valeur"), header("Note")],
+      [...assumptions, [], disclaimer],
+      { measured: assumptions }
+    ),
+    sheet(SHEET_SCHEDULE, headers.map(header), scheduleRows, {
       // The header row and the two identifying columns stay visible: on a 240-row
       // schedule, scrolling to instalment 180 otherwise loses both the column names and
       // the date of the row being read.
-      stickyRowsCount: 1,
-      stickyColumnsCount: 2,
-      columns: [
-        { width: 6 },
-        { width: 13 },
-        { width: 15 },
-        { width: 13 },
-        { width: 18 },
-        { width: 20 },
-        { width: 18 },
-        { width: 20 },
-        { width: 26 },
-        { width: 26 }
-      ]
-    }
+      stickyColumnsCount: 2
+    })
   ];
 }
 
@@ -226,14 +395,15 @@ function round2(value) {
  *
  * @param {object} solved result of solveLoan()
  * @param {string} filename
+ * @param {{constantEuros?: boolean}} [options]
  * @param {Function} [writer] injectable write-excel-file entry point
  */
-export async function exportXlsx(solved, filename = "echeancier-pret.xlsx", writer) {
+export async function exportXlsx(solved, filename = "echeancier-pret.xlsx", options, writer) {
   const write = writer || globalThis.writeXlsxFile;
   if (typeof write !== "function") {
     throw new Error("write-excel-file is not loaded");
   }
   if (!solved || !solved.schedule.length) return;
 
-  await write(buildWorkbook(solved)).toFile(filename);
+  await write(buildWorkbook(solved, options)).toFile(filename);
 }

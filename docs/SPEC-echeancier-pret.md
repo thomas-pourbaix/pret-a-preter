@@ -71,6 +71,27 @@ nous-mêmes et pourquoi. **Stop, validation, avant d'écrire du code.**
 Saisie tolérante au format français : séparateur de milliers par espace, virgule
 décimale (`200 000` et `1 234,56` doivent être acceptés).
 
+> **Défauts et pas de saisie, 16 août 2026 (troisième tour).** Les valeurs par défaut
+> passent à **10 000 € sur 10 ans**, coût cumulé **1 587 €** — ce que coûte ce prêt à 3 %
+> l'an, le mode taux affichant `3,00 %`. Motif : 200 000 € sur 20 ans est un prêt
+> immobilier bancaire, pas un prêt entre particuliers ; l'exemple d'accueil doit ressembler
+> à ce que l'outil sert.
+>
+> Deux champs cessent d'accepter n'importe quel nombre. La **somme empruntée** se saisit par
+> pas de **100 €** et le **taux** par pas de **0,05 point**, marges comprises. Une saisie
+> intermédiaire n'est pas une intention plus fine, c'est une faute de frappe — `200 05` pour
+> `200 000` — donc elle est **ramenée au plus proche** quand le champ est quitté, jamais
+> refusée en silence. Le pas de la somme est déjà `PRINCIPAL_STEP` côté noyau (§4.7) : la
+> saisie ne fait qu'appliquer à ce qui est tapé la règle que la recherche appliquait déjà à
+> ce qu'elle proposait.
+>
+> Le **coût cumulé garde sa liberté** : ce n'est pas une somme que quelqu'un vire, c'est une
+> cible, et 1 587 € est un chiffre parfaitement voulu.
+>
+> Chaque champ à pas porte quatre boutons d'incrément — fin et grossier, ±100 / ±1 000, ou
+> ±0,05 / ±0,50. Ils existent d'abord pour la vitesse, mais surtout parce que le solveur
+> tournait sur chaque frappe d'un nombre en cours de saisie ; voir la note de §3.3.
+
 ### 3.2 Mode réciproque
 
 Un basculement permet de saisir le **taux annuel nominal** à la place du coût cumulé, et
@@ -106,6 +127,54 @@ d'en déduire le coût. Même moteur, même échéancier, sens de résolution in
 > réinvestissement des mensualités. L'afficher à côté du nominal laissait croire à un coût
 > qu'il ne supporte pas. La fonction `annualEquivalentRate` reste dans le noyau, testée : le
 > retrait porte sur l'affichage, pas sur le calcul.
+
+> **Refondu en bilan le 16 août 2026.** Le bloc de résolution devient un **bilan à deux
+> colonnes — « souhaité » et « contractualisé »** — une ligne par terme du prêt : somme
+> prêtée, durée, mensualité, taux annuel nominal, coût total des intérêts, total remboursé.
+> Motif : depuis que la mensualité ronde est la seule convention (§4.3 bis), aucune des
+> valeurs saisies n'est celle qui sera signée — la somme peut bouger dans sa marge, le taux
+> s'ajuste, le coût suit le taux. Trois tuiles ne montrant que le résultat réécrivaient donc
+> l'hypothèse en silence, et les notes qui rattrapaient l'affaire répétaient les mêmes
+> chiffres en prose. Le bilan est aussi ce dont sera tiré le certificat de dette que
+> l'application générera : chaque ligne doit se lire comme un terme du contrat.
+>
+> Règles de l'affichage : l'écart entre les deux colonnes est porté sous la valeur
+> contractualisée, signé, et **n'est affiché que s'il se voit** — un écart qui s'imprime
+> comme zéro dans le format de sa ligne contredirait les deux chiffres qu'il commente. Les
+> diagnostics du solveur (itérations, résidu, solde final, échéances ajustées) descendent
+> sous le bilan : ce sont des preuves, pas des termes du contrat. Le taux mensuel n'est plus
+> affiché — c'est `taux annuel / 12`, la conversion est en pied de page.
+
+> **Diagnostics retirés de l'affichage permanent, 16 août 2026 (troisième tour).** La ligne
+> « Aucune échéance ajustée · solde final 0,00 € » disparaît. Deux raisons, l'une et
+> l'autre données par Thomas. D'abord ce sont des **invariants, pas des constats** :
+> l'échéancier solde toujours à zéro et aucune échéance n'est jamais ajustée, donc l'écrire
+> à chaque exécution n'apprend rien et ne se compare à rien. Ensuite « aucune échéance
+> ajustée » se lisait comme le **résultat d'une option** qu'on aurait cochée, alors que
+> depuis le §4.3 bis les euros ronds ne sont plus un mode mais ce que l'outil calcule ;
+> l'étiquette de mode passe pour la même raison de « mensualité ronde impossible » à
+> « repli bancaire », qui nomme la convention employée au lieu d'un réglage en échec.
+>
+> Ce qui reste sous le bilan est **exclusivement un rapport d'échec** — repli bancaire,
+> aucune combinaison dans les marges, non-convergence, taux invraisemblable — dans une
+> région `aria-live` : quand le calcul ne trouve pas ce qui était demandé, il le dit ; quand
+> il le trouve, le bilan l'a déjà montré ligne à ligne.
+>
+> **Le calcul attend une pause dans la frappe (280 ms).** Avec une marge active, le solveur
+> parcourt tous les capitaux au centuple de la bande et, pour chacun, toutes les mensualités
+> entières susceptibles d'y tomber, une dichotomie par candidate. Le relancer à chaque
+> frappe faisait ramer la page pendant la saisie d'une marge à trois chiffres, et toutes ces
+> exécutions sauf la dernière portaient sur des nombres que personne n'avait voulus. Valider
+> un champ ou cliquer un bouton d'incrément recalcule immédiatement ; le bilan s'estompe
+> tant qu'une frappe n'a pas été prise en compte, pour qu'une pause ne se lise pas comme un
+> abandon.
+>
+> **La vision inflation devient cochable.** Les courbes en pointillés du second graphique
+> n'étaient nommées nulle part — « c'est quoi ces pointillés » — et la lecture en euros
+> constants ne pouvait pas être écartée. Elle gagne donc une case à cocher (par défaut
+> active) et une entrée de légende. La case commande **d'un bloc** ce qui répond à la même
+> question : le bloc sous le bilan, la paire en pointillés, et les deux colonnes
+> correspondantes des exports CSV et XLSX.
 
 **Échéancier**, une ligne par mensualité, colonnes :
 
@@ -185,6 +254,10 @@ la convergence.
 
 Ce sont elles qui font qu'un échéancier tombe juste ou pas.
 
+> **Depuis le 16 août 2026, ce paragraphe décrit le repli, pas le cas normal** : la
+> mensualité en euros ronds du §4.3 bis s'applique toujours, et ce qui suit ne sert que
+> lorsqu'aucune mensualité ronde ne solde le prêt.
+
 1. La mensualité est arrondie au centime : `M_arrondie = round2(M)`.
 2. À chaque échéance, `intérêts = round2(capital_restant_dû × i)`, puis
    `capital_amorti = round2(M_arrondie − intérêts)`.
@@ -193,11 +266,22 @@ Ce sont elles qui font qu'un échéancier tombe juste ou pas.
 4. Conséquence assumée : le coût total effectif diffère de l'hypothèse saisie de quelques
    centimes. **Cet écart doit être affiché, pas masqué.**
 
-### 4.3 bis — Mode « mensualité en euros ronds » (ajouté le 15 août 2026)
+### 4.3 bis — Mensualité en euros ronds (ajouté le 15 août 2026)
 
-Convention alternative, **active par défaut**, destinée au prêt entre particuliers remboursé
-par virement permanent : une dernière échéance ajustée y oblige l'emprunteur à corriger son
-virement, ce qui n'est pas un problème pour une banque (elle prélève) mais en est un ici.
+Convention destinée au prêt entre particuliers remboursé par virement permanent : une
+dernière échéance ajustée y oblige l'emprunteur à corriger son virement, ce qui n'est pas un
+problème pour une banque (elle prélève) mais en est un ici.
+
+> **N'est plus un mode, le 16 août 2026.** C'était une case à cocher, active par défaut ;
+> elle est retirée et la convention s'applique désormais **toujours**. Motif : un prêt entre
+> particuliers se rembourse par virement permanent, et un virement permanent porte un nombre
+> entier d'euros — la convention bancaire du §4.3 n'était pas une alternative sérieuse, elle
+> n'était que le repli. Conséquence sur la rédaction : toute phrase qui présente l'arrondi au
+> centime et la dernière échéance ajustée comme le cas normal est fausse et doit être
+> réécrite ; §4.3 ne décrit plus que le repli du point 4 ci-dessous.
+>
+> Le noyau, lui, ne change pas : `solveLoan` garde son paramètre `roundPayment` et les deux
+> chemins restent testés. C'est l'interface qui ne propose plus le choix.
 
 Dans ce mode, la mensualité est un **nombre entier d'euros** et vaut la même chose sur les
 `n` échéances, sans exception. Il n'y a plus d'échéance ajustée.
@@ -212,7 +296,8 @@ intervalle n'est pas vide, car un pas peut enjamber zéro. L'algorithme :
 3. si aucun n'existe, essayer la mensualité entière suivante, en s'écartant d'un euro à la
    fois, de part et d'autre (à égalité, la mensualité la plus basse gagne) ;
 4. en pratique un écart de 0 à 3 € suffit toujours sur les cas testés ; la recherche
-   abandonne au-delà de 24 € et le mode se désactive alors proprement.
+   abandonne au-delà de 24 €, et l'on retombe alors sur le §4.3 — mensualité au centime,
+   dernière échéance ajustée. L'interface le dit à l'écran, en toutes lettres.
 
 **Le coût total n'est plus celui saisi** : il vaut exactement `n × M − P`. Le déplacement
 de la mensualité, le taux retenu et le nouveau coût doivent être affichés en toutes lettres.
@@ -302,6 +387,27 @@ peut refaire le calcul, même si le classeur ne le refait plus pour lui.
 identiques à celles du §3.3. Les montants sont écrits comme des **nombres** au format
 `#,##0.00`, les dates comme des **dates** au format `dd/mm/yyyy` — jamais comme du texte
 pré-formaté, pour rester exploitables dans un tableur.
+
+> **Mise en page, 16 août 2026 (troisième tour).** Le classeur était juste et illisible :
+> en-têtes tronqués, colonnes deux fois trop larges pour leurs chiffres, aucun repère
+> horizontal sur 240 lignes. Quatre règles, toutes **calculées à partir des données** et non
+> choisies à la main — c'est ce qui les rend justes quel que soit le prêt exporté :
+>
+> - **Hauteur de la ligne d'en-tête.** Les libellés étaient déjà déclarés `wrap`, mais sans
+>   hauteur de ligne un tableur garde la hauteur d'une ligne et **rogne tout le reste** :
+>   c'était toute la cause de l'illisibilité. La hauteur vaut désormais le nombre de lignes
+>   du libellé le plus haut, mesuré à la largeur réelle de sa colonne.
+> - **Largeurs ajustées au contenu.** Le maximum entre le plus large chiffre imprimé —
+>   séparateurs de milliers, décimales et signe compris — et le plus long mot insécable de
+>   l'en-tête, plus deux caractères d'air. Un en-tête qui dépasserait trois lignes élargit sa
+>   colonne caractère par caractère plutôt que de faire une tour de cinq mots.
+> - **Valeurs centrées** horizontalement et verticalement. Les colonnes de prose de l'onglet
+>   `Hypothèses` restent au fer à gauche : centrer une phrase de soixante caractères ne
+>   l'aide pas.
+> - **Une ligne sur deux teintée** (`#F1F5F4`), pour tenir sa ligne sur dix colonnes.
+>
+> Les deux colonnes en euros constants ne sont écrites que si la vision inflation est active
+> à l'écran (§3.3).
 
 Si les formules devaient revenir au périmètre, la bibliothèque retenue
 (`write-excel-file`) sait les écrire via un type de cellule `Formula` : ce serait une

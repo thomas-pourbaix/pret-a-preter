@@ -11,7 +11,12 @@ import { describe, expect, it } from "vitest";
 
 import { solveLoan } from "../src/core/finance.js";
 import { buildCsv } from "../src/export/csv.js";
-import { SCHEDULE_HEADERS, buildWorkbook, exportXlsx } from "../src/export/xlsx.js";
+import {
+  SCHEDULE_HEADERS,
+  buildWorkbook,
+  exportXlsx,
+  scheduleHeaders
+} from "../src/export/xlsx.js";
 
 const require = createRequire(import.meta.url);
 require("../vendor/write-excel-file.min.js");
@@ -81,6 +86,104 @@ describe("workbook payload", () => {
     expect(values).toContain("Taux d'inflation annuel");
     expect(values).toContain("Taux annuel réel");
     expect(values).toContain("Coût des intérêts (€ constants)");
+  });
+});
+
+/**
+ * The workbook was unreadable in a spreadsheet for reasons that have nothing to do with
+ * the figures: a wrapped header with no row height is clipped to its first line, and
+ * hand-picked column widths left a column of blank beside every number.
+ */
+describe("workbook layout", () => {
+  const [assumptions, schedule] = buildWorkbook(solved);
+  const headerRow = schedule.data[0];
+  const dataRows = schedule.data.slice(1);
+
+  it("gives the header row the height its wrapped labels need", () => {
+    // One line of the default font is 15 pt; anything at or below that is a clipped wrap.
+    expect(headerRow[0].height).toBeGreaterThan(15);
+    for (const cell of headerRow) {
+      expect(cell.wrap).toBe(true);
+      expect(cell.height).toBe(headerRow[0].height);
+    }
+    expect(assumptions.data[0][0].height).toBeGreaterThan(0);
+  });
+
+  it("centres every value on both axes", () => {
+    for (const row of dataRows) {
+      for (const cell of row) {
+        expect(cell.align).toBe("center");
+        expect(cell.alignVertical).toBe("center");
+      }
+    }
+    expect(headerRow.every((cell) => cell.align === "center")).toBe(true);
+  });
+
+  it("leaves the prose columns of the assumptions sheet ranged left", () => {
+    const [term, value, comment] = assumptions.data[1];
+    expect(term.align).toBe("left");
+    expect(comment.align).toBe("left");
+    expect(value.align).toBe("center");
+  });
+
+  it("tints one row in two, header excluded", () => {
+    const bands = dataRows.map((row) => row[0].backgroundColor);
+    expect(bands.slice(0, 4)).toEqual([undefined, "#F1F5F4", undefined, "#F1F5F4"]);
+  });
+
+  /**
+   * The widths this replaces were 6/13/15/13/18/20/18/20/26/26 against figures no wider
+   * than eleven characters. The rule now is: fit the content, and never leave more than
+   * the two characters of padding a centred value needs.
+   */
+  it("fits each column to its own content", () => {
+    const widths = schedule.columns.map((column) => column.width);
+
+    // "199 353,44" is ten characters; the column that holds it wants twelve, not twenty.
+    expect(widths[5]).toBeLessThanOrEqual(13);
+    // The instalment number never exceeds three digits on a schedule this long.
+    expect(widths[0]).toBeLessThanOrEqual(6);
+    // Nothing may be narrower than the longest unbreakable word of its own header.
+    SCHEDULE_HEADERS.forEach((label, column) => {
+      const longest = Math.max(...label.split(/\s+/).map((word) => word.length));
+      expect(widths[column]).toBeGreaterThanOrEqual(longest);
+    });
+  });
+
+  it("still writes a real xlsx once dressed", async () => {
+    const blob = await writeXlsxFile(buildWorkbook(solved)).toBlob();
+    expect(blob.size).toBeGreaterThan(1_000);
+  });
+});
+
+/**
+ * The inflation reading is a switch on screen, so it is a switch in the exports too:
+ * shipping two columns of purchasing power to someone who turned that view off would
+ * answer a question they declined to ask.
+ */
+describe("inflation view off", () => {
+  const [assumptions, schedule] = buildWorkbook(solved, { constantEuros: false });
+
+  it("drops the two constant-euro columns", () => {
+    expect(scheduleHeaders({ constantEuros: false })).toHaveLength(8);
+    expect(scheduleHeaders()).toEqual(SCHEDULE_HEADERS);
+    expect(schedule.data[0]).toHaveLength(8);
+    expect(schedule.data[1]).toHaveLength(8);
+    expect(schedule.columns).toHaveLength(8);
+  });
+
+  it("drops the inflation lines of the assumptions sheet", () => {
+    const values = assumptions.data.map((row) => row[0] && row[0].value);
+    expect(values).not.toContain("Taux d'inflation annuel");
+    expect(values).not.toContain("Taux annuel réel");
+    expect(values).toContain("Taux annuel nominal");
+  });
+
+  it("drops them from the CSV too", () => {
+    const lines = buildCsv(solved, { constantEuros: false }).split("\r\n");
+    expect(lines[0].split(";")).toHaveLength(8);
+    expect(lines[1].split(";")).toHaveLength(8);
+    expect(lines).toHaveLength(241);
   });
 });
 
