@@ -6,10 +6,14 @@ Application web statique qui résout le **taux** d'un prêt amortissable à part
 hypothèses connues — capital emprunté, durée, coût cumulé des intérêts — puis déroule
 l'échéancier mois par mois et l'exporte en tableur.
 
-Le fil directeur est la transparence : aucun chiffre affiché n'est une boîte noire.
-L'équation avec ses valeurs substituées, le nombre d'itérations du solveur et son écart
-résiduel sont affichés à l'écran, et l'écart d'arrondi entre le coût saisi et le coût
-effectif est montré plutôt que masqué.
+Elle est écrite pour le **prêt entre particuliers** : deux personnes s'accordent d'abord
+sur une somme, une durée et ce que l'emprunt coûtera, et c'est le taux qui reste à
+déterminer — l'inverse de l'ordre bancaire.
+
+Le fil directeur est la transparence : aucun chiffre affiché n'est une boîte noire. Le
+nombre d'itérations du solveur, son écart résiduel et le solde final sont affichés à
+l'écran, l'écart entre le coût saisi et le coût effectif est montré plutôt que masqué dès
+qu'il pèse un euro, et toutes les conventions de calcul sont écrites en pied de page.
 
 Tout le calcul se fait dans le navigateur. Aucun backend, aucune télémétrie, aucune
 requête vers un tiers : polices et bibliothèque d'export sont servies depuis ce dépôt.

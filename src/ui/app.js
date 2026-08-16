@@ -19,32 +19,6 @@ import { renderTable } from "./table.js";
 
 const MAX_PERIODS = 1200;
 
-/**
- * The masthead states what the page is doing, so it has to follow the mode: in rate mode
- * it is the cost that is deduced, not the rate. Both variants share the same sentence
- * shape so switching does not reflow the layout.
- */
-const MASTHEAD = {
-  cost: {
-    lead: "Trois hypothèses connues,",
-    tail: "un taux ",
-    accent: "résolu",
-    statement:
-      "Le capital, la durée et le coût total sont donnés. Le taux, lui, se déduit : " +
-      "on l'extrait par dichotomie, puis on déroule chaque échéance ligne à ligne. " +
-      "Rien n'est masqué, tout s'exporte."
-  },
-  rate: {
-    lead: "Trois hypothèses connues,",
-    tail: "un coût ",
-    accent: "déduit",
-    statement:
-      "Le capital, la durée et le taux sont donnés. Le coût, lui, se déduit : " +
-      "on en tire la mensualité, puis on déroule chaque échéance ligne à ligne. " +
-      "Rien n'est masqué, tout s'exporte."
-  }
-};
-
 const el = (id) => document.getElementById(id);
 
 const state = { solved: null, view: "monthly" };
@@ -200,13 +174,6 @@ function renderReadout() {
   renderRoundNote(solved);
   renderConstantEuros(solved);
 
-  el("substituted").replaceChildren(
-    strong(formatNumber(payment)),
-    text(` = ${formatNumber(principal, 0)} × `),
-    strong(formatNumber(rate, 7)),
-    text(` ⁄ ( 1 − ${formatNumber(1 + rate, 7)} ^ −${periods} )`)
-  );
-
   // A round instalment is shown without its two zero cents: the point is that it is round.
   const showPayment = round.applied ? formatEuroRounded : formatEuro;
   el("out-payment").textContent = showPayment(payment);
@@ -215,10 +182,9 @@ function renderReadout() {
     : `${periods} × ${formatEuro(payment)} = ${formatEuroRounded(payment * periods)}`;
 
   el("out-rate").textContent = formatPercent(solved.annualNominalRate, 3);
-  el("out-rate-sub").textContent =
-    `mensuel ${formatPercent(rate, 5)} · équivalent ${formatPercent(solved.annualEquivalentRate, 3)}`;
+  el("out-rate-sub").textContent = `mensuel ${formatPercent(rate, 5)}`;
 
-  el("out-cost").textContent = formatEuro(solved.effectiveCost);
+  el("out-cost").textContent = formatEuroRounded(solved.effectiveCost);
   el("out-cost-sub").textContent = round.applied
     ? describeDrift(solved.costDrift, "mensualité ronde")
     : rateIsKnown
@@ -280,7 +246,7 @@ function renderToleranceNote(solved) {
       strong(`${solved.periods} × ${formatEuroRounded(solved.payment)}`),
       text(", taux "),
       strong(formatPercent(solved.annualNominalRate, 4)),
-      text(`, coût ${formatEuro(solved.effectiveCost)}. `),
+      text(`, coût ${formatEuroRounded(solved.effectiveCost)}. `),
       text(
         result.alternatives > 1
           ? `${result.alternatives} combinaisons convenaient ; voici la plus proche de vos intentions.`
@@ -361,8 +327,8 @@ function renderConstantEuros(solved) {
   if (!active) return;
 
   el("constant-basis").textContent = `de ${formatMonth(solved.schedule[0].date)}`;
-  el("out-constant-cost").textContent = formatEuro(solved.constantCost);
-  el("out-constant-total").textContent = formatEuro(solved.constantTotalPaid);
+  el("out-constant-cost").textContent = formatEuroRounded(solved.constantCost);
+  el("out-constant-total").textContent = formatEuroRounded(solved.constantTotalPaid);
   el("out-real-rate").textContent = formatPercent(solved.realAnnualRate, 3);
 }
 
@@ -425,17 +391,23 @@ function renderRoundNote(solved) {
     text(
       round.offset === 0
         ? "L'arrondi tombait juste : le coût est celui que vous aviez demandé."
-        : `Le coût passe de ${formatEuro(solved.targetCost)} à ` +
-          `${formatEuro(solved.effectiveCost)}, soit ` +
-          `${solved.costDrift > 0 ? "+" : ""}${formatNumber(solved.costDrift)} €.`
+        : `Le coût passe de ${formatEuroRounded(solved.targetCost)} à ` +
+          `${formatEuroRounded(solved.effectiveCost)}, soit ` +
+          `${solved.costDrift > 0 ? "+" : ""}${formatEuroRounded(solved.costDrift)}.`
     )
   );
 }
 
+/**
+ * Cumulative amounts are displayed to the euro, so a drift of a few cents describes a gap
+ * the reader cannot even see on the figure above — it reads as noise, not as information.
+ * Below half a euro the rounded figure is the one that was asked for, and the drift is
+ * reported as conform; anything larger is still stated, never hidden.
+ */
 const describeDrift = (drift, cause) =>
-  Math.abs(drift) < 0.005
+  Math.abs(drift) < 0.5
     ? "conforme à l'hypothèse saisie"
-    : `${drift > 0 ? "+" : ""}${formatNumber(drift)} € vs hypothèse (${cause})`;
+    : `${drift > 0 ? "+" : ""}${formatEuroRounded(drift)} vs hypothèse (${cause})`;
 
 const text = (value) => document.createTextNode(value);
 
@@ -516,22 +488,6 @@ function toggleMode() {
   const rateIsKnown = el("known-rate").checked;
   el("field-cost").hidden = rateIsKnown;
   el("field-rate").hidden = !rateIsKnown;
-  renderMasthead(rateIsKnown ? MASTHEAD.rate : MASTHEAD.cost);
-}
-
-function renderMasthead({ lead, tail, accent, statement }) {
-  const emphasis = document.createElement("em");
-  emphasis.textContent = accent;
-
-  el("headline").replaceChildren(
-    text(lead),
-    document.createElement("br"),
-    text(tail),
-    emphasis,
-    text(".")
-  );
-
-  el("statement").textContent = statement;
 }
 
 init();

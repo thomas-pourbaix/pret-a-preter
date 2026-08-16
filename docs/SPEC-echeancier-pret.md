@@ -81,10 +81,31 @@ d'en déduire le coût. Même moteur, même échéancier, sens de résolution in
 **Bloc de résolution** (affiché en permanence, mis à jour à chaque frappe) :
 
 - mensualité constante,
-- taux mensuel résolu, taux annuel nominal (proportionnel), taux annuel équivalent (actuariel),
+- taux mensuel résolu et taux annuel nominal (proportionnel),
 - coût total effectif et écart avec l'hypothèse saisie,
-- l'équation avec les valeurs substituées, plus le nombre d'itérations et l'écart résiduel
-  du solveur. C'est l'élément de transparence central : il montre *comment* le taux a été trouvé.
+- le nombre d'itérations et l'écart résiduel du solveur.
+
+> **Révisé le 16 août 2026.** Le bloc affichait aussi l'équation `M = P · i / (1 − (1+i)^−n)`
+> avec ses valeurs substituées. Elle a été retirée : elle ne dit rien à qui n'a pas déjà la
+> formule en tête, et surtout elle décrit mal le mode du §4.3 bis, où le taux ne produit pas
+> la mensualité mais s'y ajuste. La transparence passe désormais par les invariants affichés
+> (itérations, résidu, solde final) et par les conventions écrites en pied de page.
+>
+> **Arrondi d'affichage, même date.** Les montants **cumulés** — coût total, coût et total
+> versé en euros constants — s'affichent à l'euro : au centime, ils imposaient au lecteur un
+> écart de quatre centimes sans portée. Les **mensualités** gardent leurs centimes, c'est le
+> montant réellement viré. L'écart avec l'hypothèse saisie n'est plus énoncé sous 0,50 €,
+> seuil en dessous duquel il ne change pas le nombre affiché ; au-delà il l'est toujours.
+> Calcul, échéancier et exports restent au centime : c'est un choix d'affichage, rien d'autre.
+>
+> **Taux équivalent retiré, même date.** Le bloc affichait aussi le taux annuel équivalent
+> (actuariel), et le pied de page en donnait la formule. Les deux sont partis, avec la ligne
+> correspondante de l'onglet des hypothèses du tableur. Motif : sur un prêt amortissable
+> l'emprunteur règle ses intérêts à chaque échéance, rien ne se capitalise côté dette, et ce
+> taux n'apparaît dans aucun de ses flux — c'est le TRI du prêteur, sous hypothèse de
+> réinvestissement des mensualités. L'afficher à côté du nominal laissait croire à un coût
+> qu'il ne supporte pas. La fonction `annualEquivalentRate` reste dans le noyau, testée : le
+> retrait porte sur l'affichage, pas sur le calcul.
 
 **Échéancier**, une ligne par mensualité, colonnes :
 

@@ -66,7 +66,6 @@ export function buildWorkbook(solved) {
     schedule,
     rate,
     annualNominalRate,
-    annualEquivalentRate,
     payment,
     effectiveCost,
     targetCost,
@@ -113,11 +112,6 @@ export function buildWorkbook(solved) {
       label("Taux annuel nominal"),
       { value: annualNominalRate, type: Number, format: RATE_ANNUAL },
       note("taux mensuel × 12 (taux proportionnel)")
-    ],
-    [
-      label("Taux annuel équivalent"),
-      { value: annualEquivalentRate, type: Number, format: RATE_ANNUAL },
-      note("(1 + taux mensuel)^12 − 1 (actuariel)")
     ],
     [
       label("Taux d'inflation annuel"),

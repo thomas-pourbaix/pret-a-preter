@@ -43,12 +43,14 @@ describe("workbook payload", () => {
     expect(firstInstalment[1].type).toBe(Date);
   });
 
-  it("carries the solved rate and both annual conventions", () => {
+  it("carries the solved rate under the sole proportional convention", () => {
     const values = sheets[0].data.map((row) => row[0] && row[0].value);
     expect(values).toContain("Taux mensuel");
     expect(values).toContain("Taux annuel nominal");
-    expect(values).toContain("Taux annuel équivalent");
     expect(values).toContain("Écart d'arrondi (€)");
+    // The equivalent rate was dropped: on an amortising loan the borrower never
+    // pays it, and the workbook should not imply otherwise.
+    expect(values).not.toContain("Taux annuel équivalent");
   });
 
   it("states the rounding gap rather than hiding it", () => {

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Échéancier — prêt amortissable</title>
-<meta name="description" content="Trois hypothèses (capital, durée, coût total), un taux résolu, un échéancier mois par mois exportable en tableur.">
+<meta name="description" content="Calculer un prêt entre particuliers : à partir de la somme, de la durée et du coût convenus, le taux, la mensualité et l'échéancier mois par mois, exportables en tableur.">
 
 <style>
 /* ---------------------------------------------------------------
@@ -122,8 +122,11 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
 }
 .switch{display:flex;border:1px solid var(--rule);border-radius:var(--r);overflow:hidden;margin-bottom:16px}
 .switch input{position:absolute;opacity:0;width:0;height:0}
+/* Both halves keep the same width even though one label is much longer, so the wrapped
+   one is centred rather than left hanging at the top of its box. */
 .switch label{
-  flex:1;text-align:center;padding:7px 8px;font-size:12.5px;cursor:pointer;
+  flex:1;display:flex;align-items:center;justify-content:center;
+  text-align:center;padding:7px 8px;font-size:12.5px;line-height:1.25;cursor:pointer;
   background:var(--paper);color:var(--ink-soft);border-right:1px solid var(--rule);
 }
 .switch label:last-of-type{border-right:0}
@@ -132,17 +135,7 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
 
 /* readout ----------------------------------------------------- */
 .readout .panel-body{padding:22px 24px}
-.equation{
-  font-family:var(--mono);font-size:15px;color:var(--ink-soft);
-  padding-bottom:14px;border-bottom:1px dashed var(--grid-major);
-}
-.equation .lhs{color:var(--ink);font-weight:600}
-.substituted{
-  font-family:var(--mono);font-size:13px;margin-top:8px;color:var(--ink-faint);
-  overflow-x:auto;white-space:nowrap;padding-bottom:2px;
-}
-.substituted b{color:var(--interest);font-weight:500}
-.solved{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:18px}
+.solved{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
 @media(max-width:620px){.solved{grid-template-columns:1fr}}
 .metric .k{
   font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
@@ -255,8 +248,8 @@ section{margin-bottom:22px}
 
   <header class="masthead">
     <p class="eyebrow">Prêt amortissable · mensualités constantes</p>
-    <h1 id="headline">Trois hypothèses connues,<br>un taux <em>résolu</em>.</h1>
-    <p class="statement" id="statement">Le capital, la durée et le coût total sont donnés. Le taux, lui, se déduit : on l'extrait par dichotomie, puis on déroule chaque échéance ligne à ligne. Rien n'est masqué, tout s'exporte.</p>
+    <h1>Le prêt entre particuliers,<br>chiffré <em>ligne à ligne</em>.</h1>
+    <p class="statement">Deux personnes s'accordent sur une somme, une durée et ce que l'emprunt coûtera — reste à savoir quel taux cela représente et combien on paie chaque mois. Cet outil résout l'un ou l'autre, déroule chaque échéance et exporte le tout en tableur. Aucune convention n'est implicite : elles sont toutes écrites en bas de page.</p>
   </header>
 
   <section class="solver">
@@ -265,11 +258,11 @@ section{margin-bottom:22px}
       <div class="panel-head"><h2>Hypothèses</h2></div>
       <div class="panel-body">
 
-        <div class="switch" role="radiogroup" aria-label="Donnée connue">
+        <div class="switch" role="radiogroup" aria-label="Donnée que vous fixez">
           <input type="radio" name="known" id="known-cost" value="cost" checked>
-          <label for="known-cost">Je connais le coût</label>
+          <label for="known-cost">Je choisis le coût de l'emprunt</label>
           <input type="radio" name="known" id="known-rate" value="rate">
-          <label for="known-rate">Je connais le taux</label>
+          <label for="known-rate">Je choisis le taux</label>
         </div>
 
         <div class="field">
@@ -323,7 +316,7 @@ section{margin-bottom:22px}
             <input type="text" id="rate-tolerance" inputmode="decimal" value="0">
             <span class="unit">%</span>
           </div>
-          <span class="hint">Chaque échéance applique ce taux <strong>divisé par 12</strong>. C'est la convention proportionnelle des offres de prêt françaises — à ne pas confondre avec le taux équivalent, actuariel, affiché à droite.</span>
+          <span class="hint">Chaque échéance applique ce taux <strong>divisé par 12</strong>, comme le font les offres de prêt françaises.</span>
         </div>
 
         <div class="field check">
@@ -357,11 +350,6 @@ section{margin-bottom:22px}
         <span class="eyebrow" style="margin:0" id="mode-tag">taux résolu</span>
       </div>
       <div class="panel-body">
-
-        <div class="equation">
-          <span class="lhs">M</span> = P × i ⁄ ( 1 − (1 + i)<sup>−n</sup> )
-          <div class="substituted" id="substituted"></div>
-        </div>
 
         <div class="solved">
           <div class="metric">
@@ -466,8 +454,8 @@ section{margin-bottom:22px}
     <p><strong>Conventions de calcul, pour que rien ne soit implicite :</strong></p>
     <ul>
       <li>Mensualité constante, intérêts calculés sur le capital restant dû au taux mensuel <em>i</em>, arrondis au centime à chaque échéance.</li>
-      <li>Taux annuel nominal = <em>i</em> × 12 (taux proportionnel, convention des offres de prêt françaises). Le taux annuel équivalent, actuariel, vaut (1+<em>i</em>)<sup>12</sup> − 1.</li>
-      <li>La mensualité est arrondie au centime, donc la dernière échéance est ajustée pour solder exactement le capital. L'écart avec le coût saisi est affiché, jamais masqué.</li>
+      <li>Taux annuel nominal = <em>i</em> × 12 (taux proportionnel, convention des offres de prêt françaises).</li>
+      <li>La mensualité est arrondie au centime, donc la dernière échéance est ajustée pour solder exactement le capital. Les cumuls sont affichés à l'euro ; l'écart avec le coût saisi est signalé dès qu'il pèse un euro, jamais masqué.</li>
       <li>Hors assurance emprunteur, frais de dossier, garantie et frais annexes : ce n'est donc pas un TAEG.</li>
       <li>Le tableur exporté contient les <strong>valeurs calculées</strong> et les hypothèses qui les produisent, sur deux onglets.</li>
     </ul>
