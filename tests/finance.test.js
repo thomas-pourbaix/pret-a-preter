@@ -19,8 +19,12 @@ import {
   buildSchedule,
   deflator,
   PRINCIPAL_STEP,
+  afterFlatTax,
+  FLAT_TAX_RATE,
+  nearestInterestFreePrincipal,
   periodicPayment,
   rateForExactInstalment,
+  solveInterestFreeRoundPayment,
   realRate,
   round2,
   solveLoan,
@@ -408,6 +412,101 @@ describe("the round-instalment rate is the one that settles the loan", () => {
     expect(plain.roundPayment.applied).toBe(false);
     expect(plain.payment).toBe(1_050);
     expect(plain.schedule[239].instalment).toBe(1_049.96);
+  });
+});
+
+/* ------------------------------------------------------ interest-free (INV-014) */
+
+/**
+ * A loan agreed free of interest stays free, whatever the round-instalment search would
+ * rather do with it.
+ *
+ * The bug this locks down: 10 000 € over 120 months costs 83,33 € a month and nothing
+ * else, but the search slid the instalment up to 84 € — the nearest whole euro some rate
+ * settles exactly — and handed back a loan at 0,1583 % costing 80 €. Interest nobody had
+ * agreed to, on the one figure the two parties are most likely to have discussed.
+ */
+describe("INV-014 — a loan asked for free of interest costs nothing", () => {
+  const free = (params) =>
+    solveLoan({ periods: 120, startDate: START, roundPayment: true, ...params });
+
+  it.each([
+    ["a zero cost", { principal: 10_000, totalCost: 0 }],
+    ["a zero rate", { principal: 10_000, periodicRate: 0 }],
+    ["a zero cost with a margin on the amount", { principal: 10_000, totalCost: 0, principalTolerance: 500 }],
+    ["a zero cost with a margin on the cost", { principal: 10_000, totalCost: 0, objectiveTolerance: 200 }],
+    ["a principal that divides evenly", { principal: 12_000, totalCost: 0 }],
+    ["an amount that is not a round hundred", { principal: 7_349, totalCost: 0 }]
+  ])("%s carries no interest", (_, params) => {
+    const solved = free(params);
+
+    expect(solved.interestFree).toBe(true);
+    expect(solved.rate).toBe(0);
+    expect(solved.annualNominalRate).toBe(0);
+    expect(solved.effectiveCost).toBe(0);
+    expect(solved.schedule.every((row) => row.interest === 0)).toBe(true);
+    // Whatever else gives way, the debt is still settled to the cent.
+    expect(solved.schedule[solved.schedule.length - 1].balance).toBe(0);
+    expect(sum(solved.schedule, "capital")).toBe(solved.principal);
+  });
+
+  it("keeps whole-euro instalments when the principal divides by the term", () => {
+    const solved = free({ principal: 12_000, totalCost: 0 });
+
+    expect(solved.payment).toBe(100);
+    expect(solved.roundPayment.applied).toBe(true);
+    expect(solved.schedule.every((row) => row.instalment === 100)).toBe(true);
+  });
+
+  it("moves the amount inside the margin to make the instalment round", () => {
+    const solved = free({ principal: 10_000, totalCost: 0, principalTolerance: 500 });
+
+    expect(solved.principal).toBe(10_200);
+    expect(solved.payment).toBe(85);
+    expect(solved.schedule.every((row) => row.instalment === 85)).toBe(true);
+  });
+
+  it("falls back on cents rather than on interest when nothing divides", () => {
+    const solved = free({ principal: 10_000, totalCost: 0 });
+
+    expect(solved.roundPayment.applied).toBe(false);
+    expect(solved.payment).toBe(83.33);
+    expect(solved.schedule[119].instalment).toBe(83.73);
+  });
+
+  it("points at the nearest amount that would divide", () => {
+    // 10 200 = 120 × 85, two hundred euros away; 9 600 = 120 × 80 is twice as far.
+    expect(nearestInterestFreePrincipal(10_000, 120)).toEqual({ principal: 10_200, payment: 85 });
+    expect(nearestInterestFreePrincipal(10_000, 7)).toEqual({ principal: 9_800, payment: 1_400 });
+    // A term no whole hundred within reach divides — 999 would need 99 900 € — so the
+    // search says nothing rather than suggest an amount that does not help.
+    expect(nearestInterestFreePrincipal(10_000, 999)).toBe(null);
+  });
+
+  it("finds nothing to round when the margin holds the amount still", () => {
+    expect(
+      solveInterestFreeRoundPayment({ principal: 10_000, periods: 120 })
+    ).toBe(null);
+  });
+
+  it("still charges interest the moment any is asked for", () => {
+    const solved = free({ principal: 10_000, totalCost: 1 });
+
+    expect(solved.interestFree).toBe(false);
+    expect(solved.effectiveCost).toBeGreaterThan(0);
+  });
+});
+
+/* --------------------------------------------------------------------- taxation */
+
+describe("the flat tax on interest", () => {
+  it("is 30 %, and exactly that", () => {
+    expect(FLAT_TAX_RATE).toBe(0.3);
+  });
+
+  it("leaves the lender seven tenths of what the borrower pays", () => {
+    expect(afterFlatTax(1_520)).toBeCloseTo(1_064, 10);
+    expect(afterFlatTax(0)).toBe(0);
   });
 });
 

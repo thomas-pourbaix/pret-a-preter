@@ -2,7 +2,9 @@
 
 > Document d'amorçage pour une nouvelle session Claude Code. Autoportant : il ne suppose
 > aucun accès aux conversations précédentes. Écrit le 16 août 2026, mis à jour le même
-> jour après le **troisième** tour de retours d'interface (§8).
+> jour après le **troisième** tour de retours d'interface (§8), après l'ajout de
+> l'**export de la reconnaissance de dette** (§9), puis après le **quatrième** tour de
+> retours (§10) — celui qui a fait tomber le bug du prêt sans intérêt.
 
 ---
 
@@ -18,11 +20,11 @@ euros ronds**, déroule l'échéancier et l'exporte.
 |---|---|
 | Dépôt local | `/Users/thomaspourbaix/Claude_workspace/Perso/Prêts entre particuliers/appli_calcul_mensualités` |
 | Dépôt distant | <https://github.com/thomas-pourbaix/loan-schedule> (public, AGPL-3.0) |
-| Branche de travail | `feat/loan-schedule` — **non fusionnée** dans `main` |
-| Pages sert | la branche `feat/loan-schedule`, racine |
-| Tests | 170, tous verts (`npx vitest run`) |
-| Dernier commit | `7a42bec`, poussé — la page en ligne montre cet état |
-| Répertoire de travail | **modifications non commitées** : les tours de retours §7 et §8 |
+| Branche de travail | `main` |
+| Pages sert | `main`, à la racine (vérifié : `gh api repos/:owner/loan-schedule/pages`) |
+| Tests | 244, tous verts (`npx vitest run`) |
+| Version | `0.2.0`, dans `src/core/version.js` — incrémentée à chaque tour déployé |
+| Dernier commit | celui qui porte l'export PDF (§9) et le quatrième tour (§10) |
 
 Le chemin local contient des accents et des espaces : **le quoter systématiquement** en bash.
 
@@ -35,13 +37,18 @@ ce qui est servi, ce qui supprime le piège des chemins absolus sur GitHub Pages
 
 ```
 index.html          page unique (markup + CSS + polices vendorisées)
-src/core/           calcul pur, sans DOM — finance.js, format.js
+src/core/           calcul pur, sans DOM — finance.js, format.js, words.js, version.js
 src/export/         csv.js, xlsx.js
+src/export/pdf/     metrics.js, document.js (écrivain PDF), deed.js (l'acte)
 src/ui/             app.js (câblage), chart.js (2 graphiques), table.js
 vendor/             write-excel-file 4.1.1 + IBM Plex, avec leurs licences
-tests/              finance.test.js, export.test.js
+tests/              finance, export, pdf, words, format, page
 docs/               SPEC-echeancier-pret.md (la référence), ce fichier
 ```
+
+`src/core/version.js` est la **source unique** du numéro de version : le pied de page de la
+page, le pied de chaque page du PDF et l'onglet `Hypothèses` du classeur y puisent, et
+`tests/page.test.js` tient `package.json` en phase. À incrémenter à chaque tour déployé.
 
 `package.json` n'existe **que pour les tests** (Vitest + deux oracles tiers en
 `devDependencies`). Rien de ce que npm installe ne part sur Pages.
@@ -95,17 +102,22 @@ par tranches de 100 €) et sur le taux ou le coût. La recherche gagne alors tr
 liberté au lieu d'un. En cas d'échec, les deux concessions possibles sont chiffrées
 séparément.
 
-**Inflation**, 2 % par défaut, sous une case « vision inflation » qui commande d'un bloc le
-bloc du bilan, les pointillés du graphique et les colonnes correspondantes des exports.
-Lecture supplémentaire en euros constants du départ ; les montants nominaux restent
-l'affichage principal.
+**Prêt sans intérêt.** Un coût nul, ou un taux de 0 %, donne un prêt gratuit — invariant
+absolu depuis le quatrième tour (INV-014, §10.1). Le taux ne bouge pas ; ce qui peut bouger,
+dans la marge autorisée, c'est la somme prêtée, jusqu'à ce que la durée la divise.
+
+**Inflation et fiscalité**, dans une section « Effet de l'inflation » sous le bilan, commandée
+par la case « vision inflation » — qui commande aussi les pointillés du graphique et les
+colonnes correspondantes des exports. Lecture en euros constants du départ, plus une ligne
+indicative nette de PFU ; les montants nominaux restent l'affichage principal.
 
 **Deux graphiques**, tous deux en escalier : composition de chaque échéance (bâtons
 jointifs, intérêts/capital) et extinction de la dette (avec les versions déflatées en
 pointillés, nommées en légende).
 
 **Exports** CSV et XLSX (valeurs, pas de formules — hors périmètre), volets figés, mise en
-page du classeur calculée à partir des données (§8.1).
+page du classeur calculée à partir des données (§8.1). Et le **PDF de la reconnaissance de
+dette**, échéancier annexé, écrit sans bibliothèque (§9).
 
 **Champs à pas.** Somme empruntée par tranches de 100 €, taux par pas de 0,05 point,
 marges comprises : une saisie intermédiaire est ramenée au plus proche à la sortie du
@@ -127,6 +139,12 @@ diff <(curl -sS https://thomas-pourbaix.github.io/loan-schedule/src/ui/app.js) s
 **Le bundle `write-excel-file` sous Node.** `node -e` ne déclenche pas la branche UMD qui
 pose le global. Il faut un vrai fichier `.cjs` ou `createRequire` ; le bundle expose alors
 `globalThis.writeXlsxFile`, et `.toBlob()` fonctionne hors navigateur.
+
+**`write-excel-file` ignore en silence une propriété de cellule qu'il ne connaît pas.** La
+couleur de police s'appelle **`textColor`**, pas `color` : l'en-tête était écrit en noir sur
+fond presque noir, sans une erreur ni un avertissement, et la charge utile paraissait juste
+(§10.2). Corollaire de méthode : sur ce module, une assertion sur la charge utile ne prouve
+rien qu'un renommage d'API ne puisse démentir — descendre jusqu'au XML produit.
 
 **Les indices d'élargissement ne doivent pas s'appeler eux-mêmes.** `searchSolutions` est
 séparée de `solveWithinTolerances` pour cette raison : la version publique construit des
@@ -152,15 +170,11 @@ paraît bizarre mérite qu'on creuse, pas qu'on l'ajuste :
 
 ## 6. Ce qui reste ouvert
 
-1. **Fusionner `feat/loan-schedule` dans `main`**, puis basculer Pages :
-   ```bash
-   gh api -X POST repos/:owner/loan-schedule/pages -f source[branch]=main -f source[path]=/
-   ```
-2. **Certificat de dette généré par l'application.** Annoncé par Thomas comme la suite : le
-   bilan « souhaité / contractualisé » du §7.1 est précisément ce qui doit s'y retrouver.
-   Rien n'est écrit à ce sujet, ni périmètre ni format ; à cadrer avant d'écrire du code.
-   Le cadre juridique (reconnaissance de dette, déclaration au-delà de 5 000 €) redevient
-   alors une question ouverte, jusqu'ici volontairement laissée hors de l'outil.
+1. ~~**Fusionner `feat/loan-schedule` dans `main`**, puis basculer Pages.~~ **Fait** :
+   Pages sert `main` à la racine, la branche de travail est `main`.
+2. ~~**Certificat de dette généré par l'application.**~~ **Fait le 16 août 2026** — voir
+   §9 : export PDF d'une reconnaissance de dette, échéancier annexé, sur la structure de
+   la fiche de l'INC. Ce qui reste ouvert de ce point est listé en §9.4.
 3. **Saisir directement la mensualité voulue.** Devenu plus criant depuis que la mensualité
    ronde est la seule convention : le coût saisi ne sert plus qu'à viser une mensualité,
    qui détermine ensuite le coût réel. Un troisième bouton « je choisis la mensualité »
@@ -170,8 +184,8 @@ paraît bizarre mérite qu'on creuse, pas qu'on l'ajuste :
    comme « saisi » alors qu'une marge active peut l'avoir déplacé (`solved.principal` vs
    `solved.requestedPrincipal`), et il ne porte pas les deux colonnes. À reprendre avec le
    point 2, dont il est la matière première.
-5. **Numéro de version en pied de page**, pour savoir d'un coup d'œil si l'on regarde la
-   dernière version déployée (voir le piège du cache).
+5. ~~**Numéro de version en pied de page**~~ **Fait le 16 août 2026** — voir §10.5 :
+   `src/core/version.js`, porté par la page, le PDF et le classeur.
 6. **Valeurs par défaut des marges** : actuellement ±0, donc la fonctionnalité est inerte
    tant qu'on ne la règle pas. Choix conservateur assumé, à réévaluer à l'usage.
 7. Hors périmètre v1, mentionné pour mémoire : assurance emprunteur, remboursements
@@ -298,10 +312,12 @@ milliers, décimales, signe, `%` — pas la valeur brute : voir `numberWidth`.
 
 Deux pièges rencontrés :
 
-- **Une phrase pleine largeur ne doit pas fixer la largeur de sa colonne.** L'avertissement
+- ~~**Une phrase pleine largeur ne doit pas fixer la largeur de sa colonne.** L'avertissement
   « ce n'est pas un TAEG » vit en colonne A de l'onglet `Hypothèses` et est censé déborder
   sur les cellules vides à sa droite. D'où le paramètre `measured` de `sheet()`, qui exclut
-  ces lignes du calcul de largeur.
+  ces lignes du calcul de largeur.~~ **Caduc depuis le quatrième tour** : l'avertissement a
+  été retiré (§10.4), et `measured` avec lui, plus rien ne l'utilisant. À ressortir de
+  l'historique git le jour où une phrase pleine largeur reviendra dans un onglet.
 - **L'ordre des propriétés dans `dress()` est significatif.** Le fond et le centrage sont
   posés *avant* l'étalement de la cellule, pour qu'une cellule qui a déclaré son propre
   alignement (les colonnes de prose, au fer à gauche) l'emporte.
@@ -363,9 +379,185 @@ frappe, sur des nombres en cours de saisie que personne n'avait voulus.
 
 ---
 
-## 9. Pour démarrer
+## 9. Reconnaissance de dette en PDF, 16 août 2026
+
+Le point §6.2 est traité. Demande : « ajoute l'export d'un modèle de reconnaissance de
+dette avec l'échéancier annexé, sur cette base
+<https://www.inc-conso.fr/content/pret-dargent-un-proche-comment-etablir-une-reconnaissance-de-dettes>,
+au format PDF, avec les champs laissés libres pour que l'utilisateur ait largement la place
+de remplir ses infos personnelles de façon manuscrite ».
+
+Le cadrage complet est en `docs/SPEC-echeancier-pret.md` §5 bis, invariants compris
+(INV-011 à INV-013). Ce qui suit est ce qu'il faut savoir avant d'y toucher.
+
+### 9.1 Ce qui a été ajouté
+
+```
+src/core/words.js          montants en toutes lettres (français, pièges compris)
+src/export/pdf/metrics.js  largeurs Adobe des 3 Helvetica, WinAnsi, repli des lignes
+src/export/pdf/document.js pages, texte, filets, rectangles, xref — l'écrivain PDF
+src/export/pdf/deed.js     la mise en page de l'acte et de l'annexe
+tests/words.test.js        11 tests
+tests/pdf.test.js          27 tests
+```
+
+Plus, côté existant : un bouton `#export-pdf` dans la barre de l'échéancier, deux lignes
+de pied de page, `formatDate` et `formatLongMonth` dans `src/core/format.js`.
+**208 tests verts** (170 avant). `src/core/finance.js` n'a pas bougé : rien de tout cela ne
+touche au calcul.
+
+### 9.2 Pourquoi un écrivain PDF maison
+
+La page affirme qu'aucun octet ne vient d'un tiers. Vendoriser une bibliothèque PDF, c'est
+quelques centaines de kilo-octets à auditer et à licencier pour un document fait de texte,
+de filets et de rectangles. Les flux de contenu ne sont pas compressés : le PDF produit se
+lit dans un éditeur de texte, comme le reste de l'outil se vérifie à la main.
+
+Deux conventions de l'écrivain : coordonnées **depuis le coin supérieur gauche** (le
+retournement se fait une fois, dans `document.js`), et **chaque tracé est enregistré** dans
+`doc.trace` — c'est ce qui rend la mise en page testable sans relire le fichier.
+
+### 9.3 Pièges rencontrés, mesurés, à ne pas redécouvrir
+
+- **Le signe € est dessiné trop large par le moteur PDF d'Apple** (QuickLook, Aperçu),
+  quelles que soient les largeurs déclarées dans le fichier : le glyphe recouvre ce qui le
+  suit sur la même ligne, « 1 520 €, » perd sa virgule. Vérifié aussi en positionnant
+  chaque fragment séparément : c'est bien le glyphe, pas l'avance. D'où la règle de
+  rédaction — le symbole seulement en fin de suite (tableaux, montant encadré), « euros »
+  en toutes lettres dans les phrases (`eurosInWords` dans `deed.js`).
+- **Une chaîne du dictionnaire `/Info` n'est pas du WinAnsi** mais du PDFDocEncoding : le
+  titre s'affichait « Reconnaissance de dette Š 10€000€ » dans l'onglet du navigateur. Elles
+  sont écrites en UTF-16BE avec BOM (`textString`).
+- **Les visionneuses ne replient rien** : la coupure des lignes est calculée ici, d'où les
+  tables de largeurs. Le fichier déclare les mêmes largeurs (`/Widths`) pour qu'aucune
+  substitution de police ne mesure autrement.
+- **Le bloc « à savoir » est posé d'un seul tenant** (`flow.needs` de sa hauteur totale) :
+  coupé, sa dernière puce se retrouvait seule sur une septième page.
+- **L'index de page d'un tracé n'est pas `pages.length - 1`** : `eachPage` (les numéros de
+  page, écrits quand le total est connu) dessine sur des pages qui ne sont plus la
+  dernière. Chaque page porte son index.
+
+Rendu vérifié page à page : `qlmanage -t -s 1400 -o . page-N.pdf` sur des PDF découpés
+page par page, QuickLook ne rendant que la première. Export rejoué dans le navigateur
+(blob `application/pdf`, 98 ko, `%PDF-1.4` / `%%EOF`), console vide, journal réseau sans
+aucune requête tierce.
+
+### 9.4 Ce que ce tour laisse ouvert
+
+- **Le point §6.4 reste entier** : l'onglet `Hypothèses` du classeur ne distingue toujours
+  pas montant souhaité et montant retenu, alors que l'acte, lui, ne porte que le retenu.
+- **Aucune donnée personnelle n'est saisie à l'écran**, par choix : l'acte se remplit à la
+  main. Si des champs de saisie devaient apparaître, il faudrait dire ce qu'ils deviennent
+  (rien ne sort du navigateur, mais encore faut-il l'écrire).
+- **Le mode de versement est un jeu de cases à cocher** imprimées, à noircir au stylo :
+  aucune n'est pré-cochée puisque l'outil ne sait pas comment les fonds circulent.
+- **Le libellé de colonne « Contractualisé » du bilan** (§7.4) engage moins qu'avant, mais
+  la question de la valeur juridique du modèle reste posée : le document le dit lui-même,
+  il ne vaut pas conseil juridique.
+
+---
+
+## 10. Quatrième tour de retours, 16 août 2026
+
+Source : un PDF de captures annotées (`feedbacks appli calcul prêt (1).pdf`), sept
+remarques. Toutes traitées ; **244 tests verts** (208 avant), rendu vérifié en 1280 px et en
+375 px, console vide, journal réseau sans aucune requête tierce, exports rejoués dans le
+navigateur (PDF 98 ko, classeur 15 ko). Ce tour est le premier depuis longtemps qui
+**touche à `src/core/finance.js`** : il contenait un vrai bug.
+
+### 10.1 Le solveur fabriquait des intérêts sur un prêt gratuit
+
+« on doit pouvoir spécifier un coût d'emprunt nul ou un taux d'intérêt à 0 %. C'est un
+invariant (toujours vrai). ici le solveur force des intérêts. » — 10 000 € sur 120 mois,
+coût 0 € : l'écran affichait 84 € par mois, 0,1583 % et 80 € d'intérêts.
+
+**Ce n'était pas `solveRate`**, qui rend bien `0` sur un coût nul, mais la recherche en
+euros ronds : `solveRoundPayment` glisse la mensualité jusqu'au premier entier qu'un taux
+solde exactement. Ce glissement suppose un taux disponible pour compenser. Sur un prêt
+gratuit il n'y en a pas, et `10 000 / 120 = 83,33 €` n'est pas entier : la recherche
+fabriquait donc les intérêts nécessaires pour atteindre 84 €.
+
+Ce qui est en place (INV-014, cadré au SPEC §6) :
+
+- `interestFree` est calculé en tête de `solveLoan` et **court-circuite les deux recherches
+  qui déplacent le taux**. Absolu, marges comprises : « sans intérêt » est une catégorie —
+  ce que deux proches se sont dit, ce que l'acte imprimera — pas un taux petit.
+- Le seul degré de liberté restant est la somme prêtée
+  (`solveInterestFreeRoundPayment`) : dans la marge autorisée, on cherche un capital que la
+  durée divise. 10 200 € sur 120 mois font 85 € tout rond, et gratuits.
+- À défaut, repli du §4.3 — la mensualité garde ses centimes, la dernière échéance les
+  absorbe — et **la note dit la vraie raison**. L'ancienne (« aucune mensualité ronde, même
+  en s'écartant de 24 € ») accusait une recherche qui n'a jamais tourné. Elle nomme
+  maintenant le montant qui tomberait juste (`nearestInterestFreePrincipal`).
+- L'étiquette de mode et la légende du bilan passent à « sans intérêt ».
+
+### 10.2 Le classeur : un nom de propriété, pas une couleur
+
+« il faut un meilleur contraste sur les header, là je vois rien ». L'en-tête était écrit en
+**noir sur le fond presque noir** de la charte. La cellule déclarait `color: "#FFFFFF"` ;
+`write-excel-file` lit **`textColor`**, et ignore en silence toute propriété inconnue. Rien
+n'a levé d'erreur — et la charge utile était parfaitement lisible, c'est le fichier produit
+qui ne l'était pas. Même correction sur le gris des colonnes de notes.
+
+**À ne pas redécouvrir :** aucune assertion sur la charge utile n'aurait attrapé ça. Le test
+ajouté ouvre l'archive `.xlsx` (zip : en-tête local, puis `inflateRawSync`), décompresse
+`xl/styles.xml` et y cherche `<color rgb="FFFFFFFF"/>`. C'est le seul niveau où la question
+« que verra le lecteur » a une réponse.
+
+Le paramètre `measured` de `sheet()` a disparu avec la phrase pleine largeur qu'il servait
+(§10.4) : plus rien ne l'utilisait.
+
+### 10.3 Le taux s'affiche par pas de 0,05 point
+
+« affiche par pas de 0.05 % max (et entre parenthèse la valeur retenue pour le calcul).
+A la fin c'est l'échéancier qui a la valeur contractuelle. »
+
+Le taux rendu par la recherche n'est pas négocié, il est **subi** : c'est celui qui fait
+tomber les échéances juste. `2,9116 %` invitait à une comparaison à une précision qui ne
+veut rien dire. Le bilan lit donc le taux sur le pas auquel il se saisit
+(`formatSteppedPercent`, `RATE_STEP` dans `format.js`), avec `(2,8785 % retenus)` en
+sous-ligne — et l'écart affiché se calcule sur les valeurs lues, donc lui aussi sur la
+grille. **L'acte exporté garde la valeur exacte** : un contrat n'arrondit pas.
+
+### 10.4 Trois remarques de rédaction
+
+- **« taux réel »** devient **« taux réel, net d'inflation »** : seul, il se lisait comme
+  « le vrai taux », le contresens exact.
+- **Le bloc des euros constants devient une section « Effet de l'inflation »**, avec la
+  **fiscalité** demandée « avec la source » : PFU de 30 % (12,8 % IR + 17,2 % prélèvements
+  sociaux), service-public.fr fiche F2613, en vigueur en 2026. Les taux sont des constantes
+  du noyau (`FLAT_TAX_*`), la ligne est libellée indicative et rendue en gris, et
+  `tests/page.test.js` vérifie que la phrase de la page cite bien ces constantes — la prose
+  n'est recompilée par rien.
+- **« hors assurance et frais annexes » est retiré partout** (écran, classeur, acte) :
+  « elle inspire méfiance ». L'outil ne calcule ni assurance ni frais et n'offre aucun champ
+  pour en saisir ; une phrase qui prémunit contre une lecture que rien ne suggère se lit
+  comme un aveu. Un test interdit son retour dans les trois fichiers.
+
+### 10.5 La version
+
+« En pied de page, le pdf doit comporter la version de l'appli (comme ça si bug, on pourra
+savoir de quelle version ça vient). » — `src/core/version.js`, source unique, portée par le
+pied de chaque page du PDF (`v0.2.0 · page 2 / 6`), l'onglet `Hypothèses` du classeur et le
+pied de la page. Traite du même coup le point §6.5, qui la réclamait à cause du cache de dix
+minutes de Pages.
+
+### 10.6 Ce que ce tour laisse ouvert
+
+- **Le point §6.4 reste entier** : l'onglet `Hypothèses` ne distingue toujours pas montant
+  souhaité et montant retenu.
+- **La section « Effet de l'inflation » disparaît avec la case « vision inflation »**, donc
+  la ligne de fiscalité aussi, alors qu'elle ne dépend pas de l'inflation. Assumé pour
+  l'instant : c'est une seule et même lecture secondaire. À revoir si Thomas décoche.
+- **Le taux réel net d'impôt** vaut `realRate(nominal × 0,7, π)` : approximation assumée
+  (seuls les intérêts sont imposés), et le taux du PFU est figé dans le code — il changera.
+
+---
+
+## 11. Pour démarrer
 
 Lire dans l'ordre : ce fichier, puis `README.md` (ce que fait l'outil et pourquoi), puis
-`docs/SPEC-echeancier-pret.md` §4 (conventions de calcul) et §6 (les dix invariants).
+`docs/SPEC-echeancier-pret.md` §4 (conventions de calcul) et §6 (les invariants du calcul),
+enfin §5 bis si le travail touche au PDF.
 Lancer `npx vitest run` pour vérifier que le socle est sain avant de toucher à quoi que ce
 soit.

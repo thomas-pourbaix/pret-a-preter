@@ -3,16 +3,28 @@
  * All the arithmetic lives in src/core; this file only moves values around.
  */
 
-import { addMonths, solveLoan, toIsoDate } from "../core/finance.js";
+import {
+  FLAT_TAX_RATE,
+  addMonths,
+  afterFlatTax,
+  nearestInterestFreePrincipal,
+  realRate,
+  solveLoan,
+  toIsoDate
+} from "../core/finance.js";
 import {
   formatEuro,
   formatEuroRounded,
   formatMonth,
   formatNumber,
   formatPercent,
-  parseFrenchNumber
+  formatSteppedPercent,
+  parseFrenchNumber,
+  roundToRateStep
 } from "../core/format.js";
+import { VERSION } from "../core/version.js";
 import { exportCsv } from "../export/csv.js";
+import { exportDeedPdf } from "../export/pdf/deed.js";
 import { exportXlsx } from "../export/xlsx.js";
 import { renderBalanceChart, renderInstalmentChart } from "./chart.js";
 import { renderTable } from "./table.js";
@@ -153,7 +165,7 @@ function compute() {
       "round-note",
       "rate-warning",
       "convergence-warning",
-      "constant-euros",
+      "inflation-effect",
       "tolerance-note"
     ]) {
       el(id).hidden = true;
@@ -210,16 +222,18 @@ function renderReadout() {
   // "mensualité ronde impossible" read as a setting that had failed, when nothing was ever
   // switched on: whole-euro instalments are what this tool computes. What the tag names
   // when they are unreachable is the convention the calculation fell back to.
-  el("mode-tag").textContent = round.applied
-    ? solved.rateIsKnown
-      ? "taux fixé"
-      : "coût fixé"
-    : "repli bancaire";
+  el("mode-tag").textContent = solved.interestFree
+    ? "sans intérêt"
+    : round.applied
+      ? solved.rateIsKnown
+        ? "taux fixé"
+        : "coût fixé"
+      : "repli bancaire";
 
   renderRateWarning(solved);
   renderToleranceNote(solved);
   renderRoundWarning(solved);
-  renderConstantEuros(solved);
+  renderInflationEffect(solved);
   renderBalanceSheet(solved);
 
   // The solver's own diagnostics — iteration count, residual, "no adjusted instalment",
@@ -278,13 +292,20 @@ function renderBalanceSheet(solved) {
     },
     {
       term: "Taux annuel nominal",
-      wish: rateIsKnown ? formatPercent(inputs.annualRate, 3) : "—",
+      // Read on the grid it is negotiated on, with the figure the schedule was actually
+      // computed from stated underneath: the rate is what gives way so that whole-euro
+      // instalments settle the debt, so it lands on values nobody chose — and printing
+      // 2,9116 % as the headline invites a comparison at a precision that means nothing.
+      wish: rateIsKnown ? formatSteppedPercent(inputs.annualRate) : "—",
       wishSub: rateIsKnown
-        ? margin(inputs.objectiveTolerance, (value) => formatPercent(value, 3))
+        ? margin(inputs.objectiveTolerance, formatSteppedPercent)
         : "l'inconnue",
-      final: formatPercent(solved.annualNominalRate, 4),
-      gap: rateIsKnown ? solved.annualNominalRate - inputs.annualRate : NaN,
-      gapFormat: (value) => `${formatNumber(value * 100, 3)} pt`
+      final: formatSteppedPercent(solved.annualNominalRate),
+      finalSub: exactRate(solved.annualNominalRate),
+      gap: rateIsKnown
+        ? roundToRateStep(solved.annualNominalRate) - roundToRateStep(inputs.annualRate)
+        : NaN,
+      gapFormat: (value) => `${formatNumber(value * 100, 2)} pt`
     },
     {
       term: "Coût total des intérêts",
@@ -307,11 +328,14 @@ function renderBalanceSheet(solved) {
 
   el("balance-body").replaceChildren(...rows.map(balanceRow));
 
-  el("balance-caption").textContent = round.applied
-    ? `Le taux est ce qui s'ajuste : il est choisi pour que ${solved.periods} virements ` +
-      `de ${formatEuroRounded(solved.payment)}, tous identiques, soldent le prêt au centime.`
-    : "Aucune mensualité ronde ne convenait ; la colonne de droite suit donc la convention" +
-      " bancaire.";
+  el("balance-caption").textContent = solved.interestFree
+    ? `Prêt sans intérêt : les ${solved.periods} échéances ne remboursent que le capital, et ` +
+      "le taux n'a rien à ajuster."
+    : round.applied
+      ? `Le taux est ce qui s'ajuste : il est choisi pour que ${solved.periods} virements ` +
+        `de ${formatEuroRounded(solved.payment)}, tous identiques, soldent le prêt au centime.`
+      : "Aucune mensualité ronde ne convenait ; la colonne de droite suit donc la convention" +
+        " bancaire.";
 }
 
 function balanceRow(row) {
@@ -357,6 +381,16 @@ function describeGap({ wish, final, gap, gapFormat }) {
   if (!Number.isFinite(gap) || wish === final) return null;
   if (gapFormat(Math.abs(gap)) === gapFormat(0)) return null;
   return `${gap > 0 ? "+" : ""}${gapFormat(gap)}`;
+}
+
+/**
+ * The rate the schedule was computed from, when reading it on the negotiation grid has
+ * rounded it away. Silent when the two coincide, so an exactly negotiated rate is not
+ * repeated to itself.
+ */
+function exactRate(value) {
+  const shown = roundToRateStep(value);
+  return Math.abs(shown - value) < 5e-7 ? null : `(${formatPercent(value, 4)} retenus)`;
 }
 
 /** A negotiating margin, restated under the figure it qualifies. */
@@ -455,24 +489,42 @@ function renderToleranceNote(solved) {
 }
 
 /**
- * Purchasing power, shown underneath the nominal figures and never in place of them:
- * what leaves the account each month is the nominal instalment, and that is the number
- * someone setting up a standing order needs. Constant euros answer a different question.
+ * Purchasing power and tax: the two things that stand between the interest a lender is
+ * promised and what they are actually left with.
  *
- * Hidden entirely at zero inflation, where the two readings coincide and the block would
- * only repeat the line above it.
+ * A section of its own since the fourth round of feedback. Folded under the balance sheet
+ * it read as a footnote to the contract, when it answers a different question: the balance
+ * sheet says what will be signed, this says what it comes to. The nominal figures stay the
+ * headline — they are what leaves the account, and what a standing order is set up for.
+ *
+ * Hidden entirely at zero inflation, where the constant-euro reading coincides with the
+ * nominal one; the tax line rides with it, being the same kind of second reading.
  */
-function renderConstantEuros(solved) {
-  const block = el("constant-euros");
+function renderInflationEffect(solved) {
+  const section = el("inflation-effect");
   const active = state.constantEuros && Math.abs(solved.annualInflation) > 1e-9;
 
-  block.hidden = !active;
+  section.hidden = !active;
   if (!active) return;
 
-  el("constant-basis").textContent = `de ${formatMonth(solved.schedule[0].date)}`;
+  const basis = formatMonth(solved.schedule[0].date);
+  const netRate = realRate(solved.annualNominalRate * (1 - FLAT_TAX_RATE), solved.annualInflation);
+
+  el("inflation-tag").textContent = `${formatPercent(solved.annualInflation, 2)} l'an`;
+  el("inflation-lead").textContent =
+    `Les montants du bilan sont nominaux : c'est ce qui quitte le compte, et ce que dit ` +
+    `le contrat. Rapportés aux euros de ${basis}, une inflation de ` +
+    `${formatPercent(solved.annualInflation, 2)} l'an les allège d'autant — chaque échéance ` +
+    "étant déflatée à sa propre date, jamais le total à la dernière.";
+
+  el("constant-basis").textContent = `de ${basis}`;
   el("out-constant-cost").textContent = formatEuroRounded(solved.constantCost);
   el("out-constant-total").textContent = formatEuroRounded(solved.constantTotalPaid);
   el("out-real-rate").textContent = formatPercent(solved.realAnnualRate, 3);
+
+  el("out-net-cost").textContent = formatEuroRounded(afterFlatTax(solved.effectiveCost));
+  el("out-net-constant-cost").textContent = formatEuroRounded(afterFlatTax(solved.constantCost));
+  el("out-net-real-rate").textContent = formatPercent(netRate, 3);
 }
 
 /** Above this nominal annual rate, the inputs are almost certainly a slip, not a loan. */
@@ -511,6 +563,34 @@ function renderRoundWarning(solved) {
   note.hidden = applied;
   if (applied) return;
 
+  // Two different failures wore the same sentence. On an interest-free loan nothing was
+  // slid by 24 €: the instalment is the principal divided by the term, full stop, and if
+  // that is not a whole number of euros no search was ever going to make it one — the only
+  // thing that could have is a different principal. Blaming a search that never ran left
+  // the lender with nothing to do about it.
+  if (solved.interestFree) {
+    const suggestion = nearestInterestFreePrincipal(solved.principal, solved.periods);
+
+    note.classList.add("info");
+    note.replaceChildren(
+      strong("Prêt sans intérêt."),
+      text(
+        ` La mensualité est le capital divisé par la durée, soit ${formatEuro(solved.payment)}, ` +
+          "qui n'est pas un nombre entier d'euros : la dernière échéance absorbe donc les " +
+          "centimes. Aucun intérêt n'est ajouté pour arrondir."
+      ),
+      ...(suggestion
+        ? [
+            text(
+              ` Une somme de ${formatEuroRounded(suggestion.principal)} tomberait juste — ` +
+                `${solved.periods} × ${formatEuroRounded(suggestion.payment)}.`
+            )
+          ]
+        : [])
+    );
+    return;
+  }
+
   note.classList.remove("info");
   note.textContent =
     "Aucune mensualité en euros ronds ne solde exactement ce prêt, même en s'écartant " +
@@ -542,6 +622,7 @@ function setView(view) {
 function setExportsEnabled(enabled) {
   el("export-csv").disabled = !enabled;
   el("export-xlsx").disabled = !enabled;
+  el("export-pdf").disabled = !enabled;
 }
 
 /** Exports carry the same columns as the screen, inflation view included or not. */
@@ -562,6 +643,20 @@ async function downloadXlsx() {
   } finally {
     button.textContent = label;
     button.disabled = false;
+  }
+}
+
+/**
+ * The deed carries the contract, not the reading of it: the constant-euro columns stay
+ * out of it whatever the inflation switch says on screen, so the export takes no options.
+ */
+function downloadDeed() {
+  try {
+    exportDeedPdf(state.solved, "reconnaissance-de-dette.pdf");
+  } catch (error) {
+    const box = el("error");
+    box.hidden = false;
+    box.textContent = `L'export de la reconnaissance de dette a échoué : ${error.message}`;
   }
 }
 
@@ -631,6 +726,10 @@ function attachStepper(id, spec) {
 }
 
 function init() {
+  // Which build is on screen. The page is served with a ten-minute cache on GitHub Pages,
+  // long enough to look at a stale script and draw the wrong conclusion from it.
+  el("app-version").textContent = `version ${VERSION}`;
+
   const firstDueDate = addMonths(new Date(), 1);
   firstDueDate.setDate(5);
   el("start").value = toIsoDate(firstDueDate);
@@ -668,6 +767,7 @@ function init() {
     exportCsv(state.solved, "echeancier-pret.csv", exportOptions())
   );
   el("export-xlsx").addEventListener("click", downloadXlsx);
+  el("export-pdf").addEventListener("click", downloadDeed);
 
   toggleMode();
   toggleInflation();

@@ -4,7 +4,8 @@
 
 Application web statique qui résout le **taux** d'un prêt amortissable à partir de trois
 hypothèses connues — capital emprunté, durée, coût cumulé des intérêts — puis déroule
-l'échéancier mois par mois et l'exporte en tableur.
+l'échéancier mois par mois, l'exporte en tableur et en tire une **reconnaissance de dette
+à imprimer et à signer**, échéancier annexé.
 
 Elle est écrite pour le **prêt entre particuliers** : deux personnes s'accordent d'abord
 sur une somme, une durée et ce que l'emprunt coûtera — un taux, ou un cumul d'intérêts —
@@ -68,8 +69,12 @@ oracles indépendants (voir plus bas).
   françaises). C'est le seul taux affiché : le taux **équivalent** (actuariel)
   `(1 + i)^12 − 1` est le TRI du prêteur sous hypothèse de réinvestissement, pas ce que
   l'emprunteur décaisse. `annualEquivalentRate` reste dans le noyau, exportée et testée.
-- Périmètre : **hors assurance emprunteur, frais de dossier, garantie et frais annexes**.
-  Ce n'est pas un TAEG.
+- Il est **affiché par pas de 0,05 point**, le pas auquel il se saisit et se négocie, avec
+  la valeur exacte retenue rappelée dessous : le taux qu'un solveur choisit pour faire
+  tomber des euros ronds n'a pas quatre décimales significatives, il a la précision d'une
+  contrainte. C'est l'échéancier qui porte la valeur contractuelle.
+- **Un coût nul, ou un taux de 0 %, donne un prêt sans intérêt** (INV-014) : la mensualité
+  vaut le capital divisé par la durée et rien n'est jamais ajouté pour l'arrondir.
 
 Hors périmètre en v1 : assurance, remboursements anticipés, différé d'amortissement, taux
 variable, prêts in fine, multi-lignes, paliers de mensualité.
@@ -106,6 +111,14 @@ revient à la convention bancaire — mensualité au centime, dernière échéan
 le dit à l'écran. Le noyau garde les deux chemins : `solveLoan` conserve son paramètre
 `roundPayment`, c'est l'interface qui ne propose plus le choix.
 
+**Le prêt sans intérêt échappe entièrement à cette recherche**, et c'est un invariant
+(INV-014). Glisser la mensualité d'un euro suppose qu'un taux vienne compenser ; sur un
+prêt à 0 %, il n'y a pas de taux à faire bouger, et 10 000 € sur 120 mois font 83,33 € par
+mois, pas 84 €. Chercher quand même produisait 80 € d'intérêts que personne n'avait
+consentis. Le seul degré de liberté qui subsiste est la somme prêtée, dans la marge
+autorisée : 10 200 € sur 120 mois font 85 € tout rond, sans un centime d'intérêt. À défaut,
+la mensualité garde ses centimes — c'est la dernière échéance qui les absorbe.
+
 ## Pouvoir d'achat
 
 L'inflation est un paramètre, **2 % par défaut**, sous une case « vision inflation » qui
@@ -121,7 +134,19 @@ avaient tous eu lieu le dernier jour. Le déflateur est équivalent (actuariel),
 `(1 + π)^(k/12)`, jamais `π/12`.
 
 Le taux réel suit Fisher, `(1 + i) / (1 + π) − 1`, et non la soustraction `i − π` qui n'en
-est que l'approximation.
+est que l'approximation. Il est nommé **« taux réel, net d'inflation »** à l'écran : « taux
+réel » seul se lit comme « le vrai taux », ce qui est exactement le contresens à éviter.
+
+Tout cela vit dans une **section « Effet de l'inflation »**, sous le bilan et non dedans :
+le bilan dit ce qui sera signé, cette section dit ce que cela vaut. On y trouve aussi la
+**fiscalité**, parce que l'inflation ne répond qu'à la moitié de la question que se pose le
+prêteur. Les intérêts qu'il encaisse sont un revenu de placement à revenu fixe : ils
+supportent le prélèvement forfaitaire unique de 30 % — 12,8 % d'impôt sur le revenu et
+17,2 % de prélèvements sociaux — sauf option pour le barème
+([service-public.fr](https://www.service-public.fr/particuliers/vosdroits/F2613), taux en
+vigueur en 2026). La ligne affichée applique ce taux tel quel : elle est présentée comme un
+ordre de grandeur, jamais comme une déclaration, et les chiffres qu'elle donne sont en gris,
+pas dans l'encre des montants calculés.
 
 Sur 200 000 € empruntés sur 240 mois à 52 000 € de coût, en mensualité ronde :
 
@@ -164,6 +189,45 @@ les libellés occupent une fois repliés à cette largeur — sans quoi un table
 en-tête replié à sa première ligne ; valeurs centrées sur les deux axes, une ligne sur deux
 teintée, ligne d'en-tête et deux premières colonnes figées.
 
+## Reconnaissance de dette, en PDF
+
+Le troisième export est un **acte à imprimer, remplir à la main et signer**, avec
+l'échéancier complet en annexe. Sa structure suit le modèle publié par l'[Institut national
+de la consommation](https://www.inc-conso.fr/content/pret-dargent-un-proche-comment-etablir-une-reconnaissance-de-dettes) :
+identités des deux parties, somme prêtée, date et mode de versement, conditions de
+remboursement, intérêts, stipulations particulières, mention manuscrite et signatures.
+
+Le partage entre ce qui est imprimé et ce qui est laissé en blanc est la seule règle de
+mise en page :
+
+- **imprimé** : tout ce que l'outil a calculé — somme, durée, mensualité, taux annuel
+  nominal, coût des intérêts, total remboursé, dates de la première et de la dernière
+  échéance. C'est la colonne « contractualisé » du bilan, sur papier. Personne n'a à
+  recopier un chiffre ;
+- **laissé libre** : tout ce que l'application ne sait pas et n'a pas à savoir — noms,
+  dates et lieux de naissance, adresses, IBAN, lieu et date de signature. Chaque champ est
+  une ligne réglée avec 25 points de hauteur d'écriture, soit environ 9 mm.
+
+La mention manuscrite de l'article 1376 du code civil est imprimée **en modèle à recopier**,
+somme en chiffres puis en toutes lettres (`src/core/words.js` écrit les montants en
+français, `quatre-vingt-seize euros`), au-dessus de trois lignes vierges. Elle doit être de
+la main de l'emprunteur : c'est ce qui donne à l'acte sa valeur de preuve, et c'est la somme
+écrite en lettres qui l'emporte en cas de différence.
+
+Le PDF est **écrit par ce projet**, sans bibliothèque (`src/export/pdf/`) : les polices
+Helvetica des visionneuses, des flux de contenu non compressés — le fichier s'ouvre dans un
+éditeur de texte et se lit — et les métriques Adobe pour couper les lignes, puisque aucune
+visionneuse ne repliera un paragraphe à notre place. Vendoriser une bibliothèque PDF aurait
+coûté quelques centaines de kilo-octets à auditer pour un document fait de texte, de filets
+et de rectangles.
+
+Le document porte son propre avertissement : c'est un modèle, il ne vaut pas conseil
+juridique. Chaque page porte aussi, en pied, **la version de l'outil qui l'a écrite**
+(`src/core/version.js`) : un acte est imprimé, classé, puis discuté des mois plus tard, et
+« la mensualité est fausse » n'est instruisible que si l'on sait quel code a écrit la page
+qu'on montre du doigt. Le classeur exporté porte la même mention parmi ses hypothèses, et
+la page l'affiche dans son pied.
+
 ## Tests
 
 Le moteur (`src/core/`) est pur : ni DOM, ni formatage, ni I/O. Les invariants sont donc
@@ -174,10 +238,24 @@ npm install
 npm test
 ```
 
-Les invariants couverts (INV-001 à INV-010) sont décrits dans
+Les invariants couverts (INV-001 à INV-014) sont décrits dans
 [docs/SPEC-echeancier-pret.md](docs/SPEC-echeancier-pret.md) §6 : remboursement intégral
 du capital, conservation, nombre de lignes, fidélité à l'hypothèse de coût, aller-retour
-entre les deux modes, monotonie des parts, cas dégénéré `n = 1`, euros constants et marges de négociation respectées.
+entre les deux modes, monotonie des parts, cas dégénéré `n = 1`, euros constants, marges de
+négociation respectées, et le prêt sans intérêt qui reste sans intérêt (INV-014).
+
+Ce que la page **affirme** est testé comme le reste (`tests/page.test.js`) : la prose n'est
+recompilée par rien, donc les rares phrases qui citent un chiffre que le code détient — les
+taux de la fiscalité, la version — sont comparées à ce chiffre plutôt que crues sur parole.
+
+Le PDF a ses propres tests (`tests/pdf.test.js`) : l'écrivain enregistre chaque tracé, ce
+qui permet d'affirmer sans relire le fichier qu'aucune ligne ne sort de la page, que
+l'annexe porte exactement une ligne par échéance et son en-tête sur chacune de ses pages,
+et que les montants du bilan y figurent. Du fichier lui-même on vérifie ce qu'une
+visionneuse exige : chaque décalage de la table de références croisées tombe bien sur son
+objet. Les montants en toutes lettres sont testés à part (`tests/words.test.js`) —
+`quatre-vingts` contre `quatre-vingt mille` n'est pas une coquette, c'est la somme qui fait
+foi.
 
 Le taux résolu est en outre **vérifié en croisé** contre deux implémentations tierces et
 indépendantes de la fonction `RATE` des tableurs. Elles sont en `devDependencies`
@@ -207,14 +285,16 @@ Seules les deux premières lignes sont servies au navigateur ; elles sont vendor
 `vendor/`, avec leur texte de licence. Toutes ces licences sont compatibles avec une
 redistribution sous AGPL-3.0.
 
-Le solveur, l'échéancier, le graphique et l'interface sont écrits pour ce projet.
+Le solveur, l'échéancier, le graphique, l'interface et l'écrivain PDF sont écrits pour ce
+projet — aucune bibliothèque PDF n'est vendorisée.
 
 ## Structure
 
 ```
 index.html          page unique, aucun build
-src/core/           calcul pur, sans DOM — finance.js, format.js
+src/core/           calcul pur, sans DOM — finance.js, format.js, words.js, version.js
 src/export/         csv.js, xlsx.js
+src/export/pdf/     écrivain PDF (metrics.js, document.js) et l'acte (deed.js)
 src/ui/             app.js, chart.js, table.js
 vendor/             write-excel-file et polices, avec leurs licences
 tests/              les invariants
@@ -242,11 +322,18 @@ pousser suffit.
 Réglage : *Settings → Pages → Build and deployment → Source: Deploy from a branch*,
 dossier `/ (root)`.
 
-**Branche servie actuellement : `feat/loan-schedule`**, le temps que le travail soit relu.
-Une fois la branche fusionnée, basculer Pages sur `main` :
+**Branche servie : `main`**, à la racine — vérifiable à tout moment :
 
 ```bash
-gh api -X POST repos/:owner/loan-schedule/pages -f source[branch]=main -f source[path]=/
+gh api repos/:owner/loan-schedule/pages
+```
+
+Les modules ES sont servis avec leur propre `cache-control: max-age=600`, indépendamment du
+HTML : on peut donc lire un `index.html` neuf accompagné d'un `app.js` vieux de dix minutes.
+D'où la version en pied de page — et, en cas de doute, la comparaison directe :
+
+```bash
+diff <(curl -sS https://thomas-pourbaix.github.io/loan-schedule/src/ui/app.js) src/ui/app.js
 ```
 
 Tous les chemins de la page sont relatifs (`./src/…`, `./vendor/…`), ce qui permet de

@@ -205,7 +205,8 @@ Les deux se lisent au survol et au clavier (flèches, Home, Fin ; Maj pour saute
 **Exports** :
 
 - CSV point-virgule, BOM UTF-8, décimales à la virgule (compatible Excel FR) ;
-- **XLSX à formules vivantes** (§5), c'est le livrable principal.
+- **XLSX à formules vivantes** (§5), c'est le livrable principal ;
+- **PDF de la reconnaissance de dette**, échéancier annexé (§5 bis, ajouté le 16 août 2026).
 
 ---
 
@@ -307,8 +308,25 @@ C'est le prix de la contrainte, et il n'a pas à être discret.
 
 - Taux annuel **nominal** = `i × 12` (taux proportionnel, convention des offres de prêt françaises).
 - Taux annuel **équivalent** (actuariel) = `(1 + i)^12 − 1`. Les deux sont affichés, jamais confondus.
-- Le périmètre est **hors assurance emprunteur, frais de dossier, garantie et frais annexes** :
-  ce n'est pas un TAEG, et l'interface doit le dire.
+- ~~Le périmètre est **hors assurance emprunteur, frais de dossier, garantie et frais
+  annexes** : ce n'est pas un TAEG, et l'interface doit le dire.~~
+
+> **Annotation du 16 août 2026 (quatrième tour de retours) — la mention est retirée
+> partout.** Elle figurait à l'écran, dans le classeur et sur l'acte. Motif donné : « enlève
+> cette mention partout, elle inspire méfiance ». Le raisonnement tient : l'outil ne calcule
+> ni assurance ni frais, ne dispose d'aucun champ pour en saisir, et n'a donc jamais laissé
+> entendre qu'il les comptait. Une phrase qui prémunit contre une lecture que rien ne suggère
+> se lit comme un aveu, et elle porte sur les seuls chiffres que l'outil produit. Le
+> périmètre reste celui du §4.5, qui l'énonce là où c'est sa place.
+>
+> **Annotation du 16 août 2026 — le taux s'affiche par pas de 0,05 point.** Le taux rendu
+> par la recherche en euros ronds n'est pas négocié, il est *subi* : c'est celui qui fait
+> tomber les échéances juste. L'imprimer à quatre décimales (`2,9116 %`) invitait à le
+> comparer à une précision qui ne veut rien dire — on ne marchande pas onze dix-millièmes de
+> point. Il est donc lu sur le pas auquel il se saisit (§ champs à pas), **la valeur exacte
+> retenue étant rappelée entre parenthèses juste dessous**, puisque c'est elle qui a produit
+> l'échéancier. Dit autrement : c'est l'échéancier qui porte la valeur contractuelle. L'acte
+> exporté, lui, imprime la valeur exacte — un contrat n'arrondit pas.
 
 ### 4.6 — Pouvoir d'achat (ajouté le 16 août 2026)
 
@@ -329,6 +347,23 @@ défaut**, et permet de lire les montants en **euros constants de la date de dé
 Les montants **nominaux restent l'affichage principal** : c'est ce qui quitte le compte
 chaque mois, et c'est le chiffre dont on a besoin pour paramétrer un virement. Les euros
 constants sont une lecture supplémentaire, jamais un remplacement.
+
+> **Annotation du 16 août 2026 (quatrième tour) — la lecture devient une section, et gagne
+> la fiscalité.** Le bloc vivait sous le bilan, où il se lisait comme une note de bas de
+> tableau ; il répond en réalité à une autre question que le bilan. Il devient une section
+> **« Effet de l'inflation »**, et le taux réel y est nommé **« taux réel, net
+> d'inflation »** — « taux réel » seul se lit comme « le vrai taux », le contresens exact.
+>
+> S'y ajoute la **fiscalité**, demandée avec sa source. Les intérêts encaissés sont un revenu
+> de placement à revenu fixe : prélèvement forfaitaire unique de **30 %**, soit 12,8 %
+> d'impôt sur le revenu et 17,2 % de prélèvements sociaux, sauf option pour le barème
+> (service-public.fr, fiche F2613, taux en vigueur en 2026). Trois règles s'imposent d'elles-
+> mêmes : le taux est **appliqué tel quel** au coût des intérêts, sans tenter de modéliser
+> une situation fiscale ; la ligne est **libellée indicative** et rendue en gris, l'encre des
+> montants calculés lui étant refusée ; les taux sont **des constantes du noyau**
+> (`FLAT_TAX_*`), et `tests/page.test.js` vérifie que la phrase de la page cite les mêmes.
+> Le taux réel net d'impôt est `realRate(nominal × (1 − 30 %), π)` : approximation assumée,
+> le prêteur n'étant imposé que sur les intérêts.
 
 ### 4.7 — Marges de négociation (ajouté le 16 août 2026)
 
@@ -409,9 +444,120 @@ pré-formaté, pour rester exploitables dans un tableur.
 > Les deux colonnes en euros constants ne sont écrites que si la vision inflation est active
 > à l'écran (§3.3).
 
+> **Contraste des en-têtes, 16 août 2026 (quatrième tour) — et le piège qui l'explique.**
+> « il faut un meilleur contraste sur les header, là je vois rien » : l'en-tête était écrit
+> en **noir par défaut sur le fond presque noir** de la charte. La cause n'est pas un choix
+> de couleur, c'est un nom de propriété. La cellule déclarait `color: "#FFFFFF"` ;
+> `write-excel-file` lit `textColor`, et **ignore en silence toute propriété qu'il ne
+> connaît pas**. Rien n'a levé d'erreur, rien n'a averti, et la charge utile était
+> parfaitement lisible — c'est le fichier produit qui ne l'était pas. Même correction sur le
+> gris des colonnes de notes, muet pour la même raison.
+>
+> D'où un test qui **descend jusqu'au XML** (`tests/export.test.js`) : l'archive est ouverte,
+> `xl/styles.xml` décompressé, et l'on y cherche la police blanche que le tableur appliquera
+> vraiment. Aucune assertion sur la charge utile n'aurait pu attraper ça.
+>
+> S'ajoute une ligne **« Version de l'outil »** parmi les hypothèses : un classeur survit à
+> l'onglet qui l'a produit.
+
 Si les formules devaient revenir au périmètre, la bibliothèque retenue
 (`write-excel-file`) sait les écrire via un type de cellule `Formula` : ce serait une
 évolution du module `src/export/xlsx.js`, pas un changement de brique.
+
+---
+
+## 5 bis — Export PDF : la reconnaissance de dette (ajouté le 16 août 2026)
+
+C'est le point §6.2 du brief de reprise, jusqu'ici annoncé et non cadré. Demande de
+Thomas : « ajoute l'export d'un modèle de reconnaissance de dette avec l'échéancier
+annexé, sur la base de la fiche de l'INC, au format PDF, avec les champs laissés libres
+pour que l'utilisateur ait largement la place de remplir ses infos personnelles de façon
+manuscrite ».
+
+### 5 bis.1 Ce que le document contient
+
+Structure reprise de la fiche de l'Institut national de la consommation, *Prêt d'argent à
+un proche : comment établir une reconnaissance de dettes* — sept paragraphes numérotés :
+
+1. **l'emprunteur** (le débiteur) : nom et prénoms, date et lieu de naissance, adresse,
+   téléphone et courriel ;
+2. **le prêteur** (le créancier) : les mêmes ;
+3. **la somme prêtée** : montant en chiffres et en toutes lettres dans un cadre, date et
+   lieu de la remise des fonds, mode de versement (cases espèces / chèque / virement) et
+   sa référence ;
+4. **les conditions de remboursement** : le tableau des termes calculés, la date de
+   prélèvement mensuel, le renvoi à l'annexe, l'IBAN du prêteur ;
+5. **les intérêts** : taux, montant total, mention de leur imposition chez le prêteur —
+   ou la phrase du prêt sans intérêt, quand le coût est nul ;
+6. **stipulations particulières**, libres ;
+7. **mention manuscrite et signatures** : le modèle à recopier, trois lignes vierges pour
+   le faire, « fait à / le », et deux cadres de signature.
+
+Suit un bloc **« à savoir »** : le seuil de 1 500 € de l'article 1359, la mention de
+l'article 1376, la déclaration du prêt de plus de 5 000 € (formulaire n° 2062), la
+prescription quinquennale de l'article 2224, la source et l'avertissement — c'est un
+modèle, il ne vaut pas conseil juridique.
+
+**L'annexe** est l'échéancier complet, une ligne par mensualité, huit colonnes (celles du
+§3.3 sans les euros constants : la vision inflation est une lecture, l'annexe est un
+contrat), en-tête répété sur chaque page, ligne de totaux, et deux paraphes.
+
+### 5 bis.2 La règle de mise en page, et la seule
+
+**Ce que l'outil a calculé est imprimé ; ce qu'il ignore est laissé libre.** Aucun montant
+n'est à recopier ; aucune donnée personnelle n'est demandée à l'écran. Les champs à
+remplir sont des lignes réglées de 25 points de hauteur d'écriture (~9 mm), doublées ou
+triplées là où il faut de la place — adresse, mention manuscrite, stipulations.
+
+La mention de l'article 1376 est imprimée **en modèle**, la somme en chiffres puis en
+toutes lettres, mais recopiée à la main : `src/core/words.js` écrit les montants en
+français, avec les pièges de la langue (`quatre-vingts` mais `quatre-vingt mille`, `deux
+cents` mais `deux cent un`, `mille` invariable). C'est testé à part, parce que c'est la
+somme en lettres qui l'emporte sur les chiffres en cas de différence.
+
+### 5 bis.3 Pourquoi le PDF est écrit ici
+
+Le module `src/export/pdf/` écrit le fichier lui-même : `metrics.js` (largeurs Adobe des
+trois Helvetica, encodage WinAnsi, repli des lignes), `document.js` (pages, texte, filets,
+rectangles, table de références croisées) et `deed.js` (la mise en page de l'acte).
+
+Motif : la page affirme qu'aucun octet ne vient d'un tiers, et vendoriser une bibliothèque
+PDF aurait ajouté quelques centaines de kilo-octets à auditer et à licencier pour un
+document fait de texte, de filets et de rectangles. Les flux de contenu ne sont pas
+compressés : le fichier produit s'ouvre dans un éditeur de texte et se lit, ce qui est la
+même exigence d'auditabilité que le reste de l'outil.
+
+Deux constats de terrain, mesurés, à ne pas redécouvrir :
+
+- **Les métriques sont à nous.** Les visionneuses ne replient pas un paragraphe : la
+  coupure des lignes se calcule ici, à partir des largeurs d'avance de l'AFM d'Adobe. Le
+  fichier déclare ces mêmes largeurs (`/Widths`), pour qu'aucune substitution de police ne
+  puisse mesurer autrement que la mise en page.
+- **Le signe € est dessiné trop large par le moteur PDF d'Apple**, quelles que soient les
+  largeurs déclarées : ce qui le suit sur la même ligne est recouvert par le glyphe. Le
+  symbole n'est donc employé qu'en fin de suite — chiffres du tableau, montant encadré —
+  et les phrases écrivent « euros » en toutes lettres. Ce qui est de toute façon la
+  rédaction d'un acte.
+
+### 5 bis.4 Invariants
+
+**INV-011 — Rien ne sort de la page.** Chaque tracé de texte de l'acte reste dans les
+marges et dans la hauteur de la feuille, quel que soit le prêt. L'écrivain enregistre ses
+tracés (`doc.trace`), ce qui rend l'affirmation testable sans relire le PDF.
+
+**INV-012 — L'annexe est complète.** Elle porte exactement `n` lignes d'échéance, son
+en-tête sur chacune de ses pages, et sa ligne de totaux vaut `n × M`, le coût des intérêts
+et le capital, avec un solde final de `0,00 €`.
+
+**INV-013 — Le fichier est un PDF valide.** En-tête `%PDF`, fin `%%EOF`, et chaque
+décalage de la table de références croisées tombe exactement sur l'objet qu'il annonce.
+Deux exécutions du même prêt, à date de création fixée, produisent les mêmes octets.
+
+> **Version en pied de page, 16 août 2026 (quatrième tour).** « le pdf doit comporter la
+> version de l'appli, comme ça si bug on pourra savoir de quelle version ça vient ». Chaque
+> pied de page porte `v<version> · page k / n`, la version venant de `src/core/version.js`,
+> source unique — le classeur et le pied de la page web y puisent aussi, et un test tient
+> `package.json` en phase. Elle est incrémentée à chaque tour déployé.
 
 ---
 
@@ -466,6 +612,25 @@ contraintes prête un multiple de 100 €, verse une mensualité entière identi
 échéances, solde à `0,00 €` exactement, et respecte les deux marges. Quand aucune solution
 n'existe, **suivre l'indice proposé doit en produire une** : c'est le seul test qui
 prouve qu'un indice est juste, et non simplement affiché.
+
+**INV-014 — Un prêt sans intérêt reste sans intérêt** (ajouté le 16 août 2026, quatrième
+tour de retours). Si le coût saisi vaut zéro, ou si le taux saisi vaut 0 %, alors le taux
+résolu vaut exactement `0`, le coût effectif exactement `0 €`, et **aucune échéance ne porte
+d'intérêts**. Sans exception, marges comprises.
+
+> **Le bug que cet invariant verrouille.** 10 000 € sur 120 mois, coût 0 € : l'application
+> affichait 84 € par mois, 0,1583 % et 80 € d'intérêts. La cause n'est pas le solveur de
+> taux — `solveRate` rend bien 0 sur un coût nul — mais la recherche en euros ronds, qui
+> glisse la mensualité jusqu'au premier entier qu'un taux solde exactement. Ce glissement
+> suppose un taux disponible pour compenser ; sur un prêt gratuit, il n'y en a pas, et
+> 10 000 / 120 = 83,33 € n'est pas un entier. La recherche fabriquait donc les intérêts dont
+> elle avait besoin pour arriver à 84 €.
+>
+> « Sans intérêt » n'est pas un taux petit, c'est une **catégorie** : c'est ce que deux
+> proches se sont dit, et ce que l'acte imprimera. Le seul degré de liberté qui subsiste est
+> la somme prêtée, dans la marge autorisée — 10 200 € sur 120 mois font 85 € tout rond, et
+> gratuits. À défaut, la mensualité garde ses centimes (repli du §4.3), et l'interface le
+> dit en nommant la vraie raison, avec la somme qui tomberait juste.
 
 **Cas de référence A** — `P = 200 000 €`, `n = 240`, `C = 52 000 €` :
 

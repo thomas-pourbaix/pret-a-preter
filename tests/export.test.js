@@ -7,6 +7,7 @@
  */
 
 import { createRequire } from "node:module";
+import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import { solveLoan } from "../src/core/finance.js";
@@ -153,6 +154,57 @@ describe("workbook layout", () => {
   it("still writes a real xlsx once dressed", async () => {
     const blob = await writeXlsxFile(buildWorkbook(solved)).toBlob();
     expect(blob.size).toBeGreaterThan(1_000);
+  });
+});
+
+/**
+ * The header was written in the default black on a near-black fill — bold, centred,
+ * correctly wrapped and completely invisible. The payload said `color: "#FFFFFF"`; the
+ * property write-excel-file reads is `textColor`, and an unknown one is dropped without a
+ * word. Nothing in the payload could have shown that, so this test reads the styles the
+ * spreadsheet will actually apply, out of the file itself.
+ */
+describe("what the spreadsheet actually receives", () => {
+  /** One entry of the .xlsx, which is a zip of XML: local header, then a raw deflate. */
+  async function entry(blob, wanted) {
+    const bytes = Buffer.from(await blob.arrayBuffer());
+    let offset = 0;
+
+    while (offset < bytes.length - 4 && bytes.readUInt32LE(offset) === 0x04034b50) {
+      const method = bytes.readUInt16LE(offset + 8);
+      const size = bytes.readUInt32LE(offset + 18);
+      const nameLength = bytes.readUInt16LE(offset + 26);
+      const extraLength = bytes.readUInt16LE(offset + 28);
+      const name = bytes.toString("utf8", offset + 30, offset + 30 + nameLength);
+      const start = offset + 30 + nameLength + extraLength;
+
+      if (name === wanted) {
+        const data = bytes.subarray(start, start + size);
+        return (method === 0 ? data : inflateRawSync(data)).toString("utf8");
+      }
+      offset = start + size;
+    }
+    return null;
+  }
+
+  it("writes the header in white on the dark fill, not in the default ink", async () => {
+    const blob = await writeXlsxFile(buildWorkbook(solved)).toBlob();
+    const styles = await entry(blob, "xl/styles.xml");
+
+    // ARGB, alpha first. Without the fix the only font colours were `theme="1"` — black.
+    expect(styles).toContain('<color rgb="FFFFFFFF"/>');
+    expect(styles).toContain('<fgColor rgb="FF17262B"/>');
+
+    // The bold font of the header row is the one carrying that white.
+    const fonts = styles.slice(styles.indexOf("<fonts"), styles.indexOf("</fonts>"));
+    expect(fonts).toMatch(/<b\/>[^]*?<color rgb="FFFFFFFF"\/>/);
+  });
+
+  it("carries the grey of the notes column as a real font colour", async () => {
+    const blob = await writeXlsxFile(buildWorkbook(solved)).toBlob();
+    const styles = await entry(blob, "xl/styles.xml");
+
+    expect(styles).toContain('<color rgb="FF5F757C"/>');
   });
 });
 

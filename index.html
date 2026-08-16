@@ -205,12 +205,22 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
 }
 .tolerance .unit{font-family:var(--mono);font-size:12.5px;color:var(--ink-soft)}
 
-/* purchasing power: a secondary reading, never louder than the nominal figures */
-.constant-euros{
-  margin-top:16px;padding:12px 14px;border:1px dashed var(--grid-major);border-radius:var(--r);
+/* purchasing power and tax: a secondary reading, never louder than the nominal figures.
+   Its own section since the third round of feedback — folded under the balance sheet it
+   read as a footnote to the contract, when it answers a different question entirely:
+   not what will be signed, but what the lender is actually left with. */
+.reading-lead{margin:0 0 14px;max-width:70ch;font-size:13.5px;color:var(--ink-soft)}
+.readings{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.reading-block{
+  padding:12px 14px;border:1px dashed var(--grid-major);border-radius:var(--r);
   background:#FBFCFC;
 }
-.constant-euros .k{
+.reading-source{
+  margin:14px 0 0;max-width:78ch;font-size:12px;line-height:1.55;color:var(--ink-faint);
+}
+.reading-source a{color:var(--interest)}
+.reading-source strong{color:var(--ink-soft)}
+.reading-block .k{
   font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--ink-faint);display:block;margin-bottom:6px;
 }
@@ -219,6 +229,8 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
   font-family:var(--mono);font-size:12.5px;color:var(--ink-soft);
 }
 .constant-figures b{color:var(--capital);font-weight:600}
+/* An order of magnitude does not get the ink of a computed figure. */
+.reading-block.indicative .constant-figures b{color:var(--ink-soft)}
 .convergence{
   margin-top:18px;padding-top:12px;border-top:1px solid var(--rule);
   font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);
@@ -286,6 +298,7 @@ footer{margin:36px 0 60px;padding-top:18px;border-top:1px solid var(--rule);colo
 footer ul{margin:8px 0 0;padding-left:18px}
 footer li{margin-bottom:4px}
 footer a{color:var(--interest)}
+.version{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint)}
 section{margin-bottom:22px}
 @media print{
   body{background:#fff}
@@ -354,7 +367,7 @@ section{margin-bottom:22px}
             <input type="text" id="cost-tolerance" inputmode="decimal" value="0">
             <span class="unit">€</span>
           </div>
-          <span class="hint">Intérêts seuls, hors assurance et frais de dossier. 1 587 € est ce que coûte la valeur par défaut ci-dessus à 3 % l'an.</span>
+          <span class="hint">Le cumul des intérêts sur toute la durée du prêt. 1 587 € est ce que coûte la valeur par défaut ci-dessus à 3 % l'an ; 0 € est une réponse valable, et donne un prêt sans intérêt.</span>
         </div>
 
         <div class="field" id="field-rate" hidden>
@@ -413,15 +426,6 @@ section{margin-bottom:22px}
         </table>
         <p class="balance-caption" id="balance-caption"></p>
 
-        <div class="constant-euros" id="constant-euros" hidden>
-          <span class="k">En euros constants <span id="constant-basis"></span></span>
-          <div class="constant-figures">
-            <span>coût des intérêts <b id="out-constant-cost">—</b></span>
-            <span>total versé <b id="out-constant-total">—</b></span>
-            <span>taux réel <b id="out-real-rate">—</b></span>
-          </div>
-        </div>
-
         <!-- Everything below is a failure report. A run that finds what was asked for
              says nothing here: the balance sheet above already shows it, term by term. -->
         <div id="diagnostics" aria-live="polite">
@@ -434,6 +438,40 @@ section{margin-bottom:22px}
       </div>
     </div>
 
+  </section>
+
+  <!-- A reading of the balance sheet above, not a term of the contract: what the lender
+       is left with once the two things that quietly take their share have taken it. -->
+  <section class="panel" id="inflation-effect" hidden>
+    <div class="panel-head">
+      <h2>Effet de l'inflation</h2>
+      <span class="eyebrow" style="margin:0" id="inflation-tag"></span>
+    </div>
+    <div class="panel-body">
+      <p class="reading-lead" id="inflation-lead"></p>
+
+      <div class="readings">
+        <div class="reading-block">
+          <span class="k">En euros constants <span id="constant-basis"></span></span>
+          <div class="constant-figures">
+            <span>coût des intérêts <b id="out-constant-cost">—</b></span>
+            <span>total versé <b id="out-constant-total">—</b></span>
+            <span>taux réel, net d'inflation <b id="out-real-rate">—</b></span>
+          </div>
+        </div>
+
+        <div class="reading-block indicative">
+          <span class="k">Pour le prêteur, net d'impôt — indicatif</span>
+          <div class="constant-figures">
+            <span>intérêts nets <b id="out-net-cost">—</b></span>
+            <span>en euros constants <b id="out-net-constant-cost">—</b></span>
+            <span>taux réel, net d'impôt et d'inflation <b id="out-net-real-rate">—</b></span>
+          </div>
+        </div>
+      </div>
+
+      <p class="reading-source">Les intérêts encaissés par le prêteur sont un revenu de placement à revenu fixe : ils supportent le prélèvement forfaitaire unique de <strong>30 %</strong> — 12,8 % d'impôt sur le revenu et 17,2 % de prélèvements sociaux — sauf option pour le barème de l'impôt sur le revenu, qui peut être plus favorable aux revenus modestes (<a href="https://www.service-public.fr/particuliers/vosdroits/F2613">service-public.fr, revenus d'épargne et de placement</a>, taux en vigueur en 2026). La ligne ci-dessus applique ce taux tel quel au coût des intérêts : c'est un ordre de grandeur, pas une déclaration.</p>
+    </div>
   </section>
 
   <section class="panel">
@@ -479,7 +517,8 @@ section{margin-bottom:22px}
         <button type="button" id="view-monthly" aria-pressed="true">Détail mensuel</button>
         <button type="button" id="view-yearly" aria-pressed="false">Synthèse annuelle</button>
         <button type="button" id="export-csv">Exporter CSV</button>
-        <button type="button" class="primary" id="export-xlsx">Exporter le tableur</button>
+        <button type="button" id="export-xlsx">Exporter le tableur</button>
+        <button type="button" class="primary" id="export-pdf">Reconnaissance de dette (PDF)</button>
       </div>
     </div>
     <div class="scroller" tabindex="0" role="region" aria-label="Tableau de l'échéancier, défilable au clavier">
@@ -508,16 +547,21 @@ section{margin-bottom:22px}
       <li>Taux annuel nominal = <em>i</em> × 12 (taux proportionnel, convention des offres de prêt françaises).</li>
       <li>La mensualité est un nombre entier d'euros, identique de la première à la dernière échéance : c'est le taux qui est choisi pour que ces échéances soldent le capital au centime, solde final 0,00 €. La mensualité ronde s'écarte donc de celle qui découlerait exactement de vos hypothèses, et le taux comme le coût s'en trouvent déplacés — le bilan affiche les deux colonnes, souhaité et contractualisé, et ne masque aucun écart.</li>
       <li>Quand aucune mensualité ronde ne solde le prêt, même en s'écartant de 24 €, le calcul revient à la convention bancaire — mensualité au centime, dernière échéance ajustée — et le dit à l'écran. Les cumuls sont affichés à l'euro.</li>
-      <li>Hors assurance emprunteur, frais de dossier, garantie et frais annexes : ce n'est donc pas un TAEG.</li>
+      <li>Un coût nul, ou un taux de 0 %, donne un prêt <strong>sans intérêt</strong> : la mensualité vaut alors le capital divisé par la durée, et rien n'est jamais ajouté pour la rendre ronde.</li>
+      <li>Le taux est affiché par pas de 0,05 point, comme il se négocie ; la valeur exacte retenue pour dérouler l'échéancier est rappelée juste en dessous.</li>
       <li>Le tableur exporté contient les <strong>valeurs calculées</strong> et les hypothèses qui les produisent, sur deux onglets.</li>
+      <li>La <strong>reconnaissance de dette</strong> exportée en PDF reprend les termes contractualisés du bilan et annexe l'échéancier complet. Les montants sont imprimés, les informations personnelles sont laissées à remplir à la main. C'est un modèle, pas un conseil juridique.</li>
     </ul>
     <p style="margin-top:14px;font-size:12.5px;color:var(--ink-faint)">
-      Export tableur assuré par <a href="https://gitlab.com/catamphetamine/write-excel-file">write-excel-file</a> (MIT). Police <a href="https://github.com/IBM/plex">IBM Plex</a> (OFL-1.1), servie depuis ce dépôt. La résolution du taux est écrite pour ce projet : encadrement puis dichotomie, vérifiée en test contre les implémentations de <code>RATE</code> de Formula.js et tvm-financejs.
+      Export tableur assuré par <a href="https://gitlab.com/catamphetamine/write-excel-file">write-excel-file</a> (MIT). Police <a href="https://github.com/IBM/plex">IBM Plex</a> (OFL-1.1), servie depuis ce dépôt. Le PDF est écrit par ce projet, sans bibliothèque : texte, filets et rectangles, en flux non compressés lisibles tels quels ; sa structure suit le modèle de reconnaissance de dette publié par l'<a href="https://www.inc-conso.fr/content/pret-dargent-un-proche-comment-etablir-une-reconnaissance-de-dettes">Institut national de la consommation</a>. La résolution du taux est écrite pour ce projet : encadrement puis dichotomie, vérifiée en test contre les implémentations de <code>RATE</code> de Formula.js et tvm-financejs.
       Page statique : tout le calcul se fait dans votre navigateur, aucune donnée n'est transmise, aucune requête n'est faite à un tiers.
     </p>
     <p style="margin-top:10px;font-size:12.5px">
       Logiciel libre sous <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a> —
       <a href="https://github.com/thomas-pourbaix/loan-schedule">code source sur GitHub</a>.
+      <!-- Written by app.js from src/core/version.js: one source, and a page served from a
+           stale cache is recognisable on sight. The exported PDF carries the same string. -->
+      <span id="app-version" class="version"></span>
     </p>
   </footer>
 

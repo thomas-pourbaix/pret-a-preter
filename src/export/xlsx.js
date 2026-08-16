@@ -13,6 +13,8 @@
  * wrapped header with no row height set is clipped to one line by the spreadsheet.
  */
 
+import { VERSION } from "../core/version.js";
+
 const MONEY = "#,##0.00";
 const RATE_MONTHLY = "0.00000%";
 const RATE_ANNUAL = "0.000%";
@@ -74,12 +76,17 @@ const MAX_HEADER_LINES = 3;
 /**
  * Header cells: reversed out of the dark ink, wrapped, and centred over their column.
  * The row height that makes the wrap visible is set by headerHeight().
+ *
+ * The font colour property is `textColor`, and this is not a detail: write-excel-file
+ * ignores an unknown cell property in silence, so `color` produced a header written in the
+ * default black on a near-black fill — legible in the payload, invisible in the workbook.
+ * Nothing errored, nothing warned; the trap is that the wrong name looks right.
  */
 const header = (value) => ({
   value,
   type: String,
   fontWeight: "bold",
-  color: "#FFFFFF",
+  textColor: "#FFFFFF",
   backgroundColor: INK,
   align: "center",
   alignVertical: "center",
@@ -88,7 +95,7 @@ const header = (value) => ({
 
 const money = (value) => ({ value, type: Number, format: MONEY });
 const label = (value) => ({ value, type: String, align: "left" });
-const note = (value) => ({ value, type: String, color: "#5F757C", align: "left" });
+const note = (value) => ({ value, type: String, textColor: "#5F757C", align: "left" });
 
 /* ------------------------------------------------------------------------ layout */
 
@@ -216,15 +223,9 @@ function dress(dataRows) {
   );
 }
 
-/**
- * Assembles a sheet: header row measured, data rows dressed, columns fitted.
- *
- * `measured` exists for rows that must not set the width of their column — a full-width
- * sentence sitting in column A is meant to spill across the empty cells beside it, not to
- * widen the column to its own length.
- */
-function sheet(name, headerRow, dataRows, { measured = dataRows, ...extra } = {}) {
-  const widths = fitColumns([headerRow, ...measured]);
+/** Assembles a sheet: header row measured, data rows dressed, columns fitted. */
+function sheet(name, headerRow, dataRows, extra = {}) {
+  const widths = fitColumns([headerRow, ...dataRows]);
   const height = headerHeight(headerRow, widths);
 
   return {
@@ -340,13 +341,10 @@ export function buildWorkbook(solved, { constantEuros = true } = {}) {
         ? { value: schedule[0].date, type: Date, format: DATE }
         : { value: null, type: String },
       note("saisie")
-    ]
-  ];
-
-  const disclaimer = [
-    label(
-      "Hors assurance emprunteur, frais de dossier, garantie et frais annexes : ce n'est pas un TAEG."
-    )
+    ],
+    // Which build produced the file. A workbook outlives the tab it was exported from,
+    // and a figure questioned six months later is only checkable against a known version.
+    [label("Version de l'outil"), label(VERSION), note("échéancier de prêt")]
   ];
 
   const headers = scheduleHeaders({ constantEuros });
@@ -373,8 +371,7 @@ export function buildWorkbook(solved, { constantEuros = true } = {}) {
     sheet(
       SHEET_ASSUMPTIONS,
       [header("Hypothèse"), header("Valeur"), header("Note")],
-      [...assumptions, [], disclaimer],
-      { measured: assumptions }
+      assumptions
     ),
     sheet(SHEET_SCHEDULE, headers.map(header), scheduleRows, {
       // The header row and the two identifying columns stay visible: on a 240-row
@@ -385,7 +382,11 @@ export function buildWorkbook(solved, { constantEuros = true } = {}) {
   ];
 }
 
-/** Local copy of the rounding helper, to keep this module free of core imports. */
+/**
+ * Local copy of the rounding helper: this module takes nothing from the core but the
+ * version string, and no arithmetic at all. Two lines of duplication buy an export layer
+ * that could be lifted out whole.
+ */
 function round2(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }

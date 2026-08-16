@@ -304,6 +304,54 @@ function candidatePrincipals(target, tolerance) {
   );
 }
 
+/**
+ * An interest-free loan is repaid by instalments of principal alone, so the only way to
+ * make every instalment a whole number of euros is for the principal itself to divide
+ * evenly by the term. There is no rate left to give ground with: 10 000 € over 120 months
+ * is 83,33 € a month, and no search turns that into a round figure without charging
+ * interest — which is precisely what a loan agreed free of interest must never do
+ * (INV-014).
+ *
+ * What can still move is the principal, within the margin the lender allowed: 9 600 € over
+ * 120 months is 80 € a month, exactly, and free.
+ *
+ * @returns {{principal: number, payment: number, rate: number, offset: number}|null}
+ */
+export function solveInterestFreeRoundPayment({ principal, principalTolerance = 0, periods }) {
+  for (const candidate of candidatePrincipals(principal, principalTolerance)) {
+    const payment = candidate / periods;
+    if (Number.isInteger(payment)) {
+      return { principal: candidate, payment, rate: 0, offset: 0 };
+    }
+  }
+  return null;
+}
+
+/**
+ * The nearest whole-hundred principal that a whole-euro instalment repays interest-free.
+ *
+ * Its only job is to tell the lender which way to move when their own amount does not
+ * divide: « 9 600 € y arriverait » is actionable, « aucune mensualité ronde n'existe » is
+ * not.
+ *
+ * @returns {{principal: number, payment: number}|null}
+ */
+export function nearestInterestFreePrincipal(
+  principal,
+  periods,
+  maxOffset = MAX_HINT_PRINCIPAL_OFFSET
+) {
+  for (let offset = PRINCIPAL_STEP; offset <= maxOffset; offset += PRINCIPAL_STEP) {
+    for (const candidate of [principal - offset, principal + offset]) {
+      const rounded = Math.round(candidate / PRINCIPAL_STEP) * PRINCIPAL_STEP;
+      if (rounded > 0 && Number.isInteger(rounded / periods)) {
+        return { principal: rounded, payment: rounded / periods };
+      }
+    }
+  }
+  return null;
+}
+
 /** What the caller is aiming at, and how far it may be missed. */
 function measure(objective, principal, payment, periods, rate) {
   return objective.kind === "rate" ? rate * 12 : payment * periods - principal;
@@ -499,6 +547,13 @@ export function solveLoan({
 }) {
   const rateIsKnown = periodicRate !== undefined;
 
+  // A loan agreed free of interest is a category, not a number that happens to be small:
+  // « prêt sans intérêt » is what the two parties said to each other and what the deed
+  // will print. The round-instalment search is allowed to move the rate — that is its
+  // whole purpose — but never away from zero, or the tool would invent interest nobody
+  // agreed to. Asked for nothing, the loan costs nothing (INV-014).
+  const interestFree = rateIsKnown ? periodicRate === 0 : !(totalCost > 0);
+
   let rate;
   let exactPayment;
   let targetCost;
@@ -525,7 +580,20 @@ export function solveLoan({
 
   const tolerancesGiven = principalTolerance > 0 || objectiveTolerance > 0;
 
-  if (roundPayment && tolerancesGiven) {
+  if (roundPayment && interestFree) {
+    // The only degree of freedom left is the principal: see solveInterestFreeRoundPayment.
+    // When it does not divide, the loan falls back on the banking convention below —
+    // instalment to the cent, last one adjusted — and stays free, which is the point.
+    const free = solveInterestFreeRoundPayment({ principal, principalTolerance, periods });
+
+    if (free) {
+      lentPrincipal = free.principal;
+      payment = free.payment;
+      rate = 0;
+      settleWithLastInstalment = false;
+      rounded = { payment, rate: 0, offset: 0 };
+    }
+  } else if (roundPayment && tolerancesGiven) {
     // With a margin to play with, the principal becomes a third unknown and the rate is
     // held to the band the lender asked for, instead of landing wherever it fell.
     const objective = rateIsKnown
@@ -551,7 +619,9 @@ export function solveLoan({
   }
 
   // No tolerances, or none of them helped: fall back to sliding the instalment alone.
-  if (roundPayment && !rounded) {
+  // Never on an interest-free loan — sliding the instalment is exactly how a zero cost
+  // would turn into eighty euros of interest.
+  if (roundPayment && !rounded && !interestFree) {
     rounded = solveRoundPayment({ principal, periods, targetPayment: exactPayment });
     if (rounded) {
       // The rate is no longer the one that matches the requested cost: it is the one
@@ -597,6 +667,9 @@ export function solveLoan({
     residual,
     converged,
     rateIsKnown,
+    // Asked for free of interest, and therefore free of interest: the flag is what lets
+    // the interface explain a non-round instalment without blaming a search that never ran.
+    interestFree,
     // Purchasing power. Nominal figures stay the headline — they are what leaves the
     // account — and these restate them in euros of the day the loan starts.
     annualInflation,
@@ -646,6 +719,29 @@ export function deflator(annualInflation, monthIndex) {
  */
 export function realRate(annualNominal, annualInflation) {
   return (1 + annualNominal) / (1 + annualInflation) - 1;
+}
+
+/**
+ * What the lender keeps of the interest, once tax has taken its share.
+ *
+ * Interest on a loan between individuals is a fixed-income investment product: unless the
+ * lender opts for the income-tax scale, it bears the prélèvement forfaitaire unique — 30 %
+ * in 2026, being 12,8 % of income tax and 17,2 % of social contributions (service-public.fr,
+ * « Impôt sur le revenu — Revenus d'épargne et de placement », fiche F2613).
+ *
+ * An order of magnitude, and displayed as one: the actual bill depends on the lender's
+ * situation, on the option they take and on a rate parliament can change. It is here
+ * because a real return is what the lender is trying to judge, and inflation alone answers
+ * half of that question.
+ */
+export const FLAT_TAX_INCOME_RATE = 0.128;
+export const FLAT_TAX_SOCIAL_RATE = 0.172;
+/** round2 because 0,128 + 0,172 is 0,30000000000000004 in binary, and the rate is 30 %. */
+export const FLAT_TAX_RATE = round2(FLAT_TAX_INCOME_RATE + FLAT_TAX_SOCIAL_RATE);
+
+/** An amount of interest, net of the flat tax. */
+export function afterFlatTax(amount) {
+  return amount * (1 - FLAT_TAX_RATE);
 }
 
 /**
