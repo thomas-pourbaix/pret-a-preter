@@ -278,10 +278,10 @@ describe("the deed", () => {
     const numbers = said.filter((text) => text.includes("page "));
     expect(numbers).toHaveLength(doc.pageCount);
     expect(numbers[0]).toBe(
-      `${APP_NAME} — ${APP_TAGLINE} · v${VERSION} · page 1 / ${doc.pageCount}`
+      `Généré par ${APP_NAME} — ${APP_TAGLINE} · v${VERSION} · page 1 / ${doc.pageCount}`
     );
     expect(numbers[doc.pageCount - 1]).toBe(
-      `${APP_NAME} — ${APP_TAGLINE} · v${VERSION} · page ${doc.pageCount} / ${doc.pageCount}`
+      `Généré par ${APP_NAME} — ${APP_TAGLINE} · v${VERSION} · page ${doc.pageCount} / ${doc.pageCount}`
     );
   });
 
