@@ -248,6 +248,11 @@ input[type=text]:hover,select:hover{border-color:var(--grid-major)}
   font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--ink-faint);display:block;margin-bottom:6px;
 }
+/* Answers "how can a rate this small add up to that much interest?" right where the
+   two figures that raise the question sit — a footnote read after the source, not
+   before, would be too late. */
+.reading-note{margin:10px 0 0;font-size:12px;line-height:1.5;color:var(--ink-faint)}
+.reading-note strong{color:var(--ink-soft)}
 .constant-figures{
   display:flex;flex-wrap:wrap;gap:6px 22px;
   font-family:var(--mono);font-size:12.5px;color:var(--ink-soft);
@@ -551,6 +556,10 @@ section{margin-bottom:22px}
             <span>intérêts nets, en euros constants <b id="out-net-constant-cost">—</b></span>
             <span>taux annuel réel, net des deux <b id="out-net-real-rate">—</b></span>
           </div>
+          <p class="reading-note">Un taux réel proche de zéro n'a rien de contradictoire avec un total qui ne l'est
+            pas : ce taux est un <strong>rendement annuel</strong>, quand le total cumule l'intérêt mensuel d'un
+            capital resté substantiel pendant toute la durée du prêt — pas une application unique du taux à la
+            somme prêtée.</p>
         </div>
       </div>
 
